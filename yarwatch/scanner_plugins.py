@@ -1,3 +1,4 @@
+
 import os
 import subprocess
 import yara
@@ -15,6 +16,11 @@ def scan_yara_file_plugin(ctx):
     fe = ctx["feature_extractor"]
     results = ctx["results"]
 
+    # Ensure aggregation containers exist (so later plugins/UI can rely on them)
+    results.setdefault("yara_matches", [])
+    results.setdefault("rules", [])
+    results.setdefault("strings", [])  # will hold a de-duplicated union across all rules
+
     def callback(data):
         return yara_callback(data, ctx)
 
@@ -25,7 +31,6 @@ def scan_yara_file_plugin(ctx):
     )
 
     results["matches_found"] = bool(matches)
-
 
 
 def scan_thq_plugin(ctx):
@@ -81,18 +86,18 @@ def scan_vt_plugin(ctx):
     results["vt_hits"] = hits
 
 
-
 def scan_dns_plugin(ctx):
-    logger = ctx["logger"]
     file_path = ctx["file_path"]
     results = ctx["results"]
-
     try:
-        domains, _, _ = dns_extractor.extract_from_file(file_path)
-        results["dns_domains"] = domains
+        domains, removed, _ = dns_extractor.extract_from_file(file_path, output_file=None)
+        # keep only suspicious side (first list)
+        results["dns_domains"] = domains or []
     except Exception as e:
+        ctx["logger"].log(f"[DNS ERROR] {e}")
         results["dns_domains"] = []
 
+# --- YARA rules loader (unchanged) ---
 def get_yara_rules():
     import yarwatch.config as config
     if not hasattr(get_yara_rules, "_rules"):
@@ -104,6 +109,7 @@ def get_yara_rules():
         get_yara_rules._rules = yara.compile(filepaths=rule_dict)
     return get_yara_rules._rules
 
+# --- Callback now aggregates ALL matches instead of overwriting ---
 def yara_callback(data, ctx):
     rule = data.get("rule")
     logger = ctx["logger"]
@@ -111,16 +117,44 @@ def yara_callback(data, ctx):
     file_path = ctx["file_path"]
     results = ctx["results"]
 
+    # pull strings (unique, readable)
     strings_matched = set()
-    for s in data["strings"]:
-        for instance in s.instances:
+    for s in data.get("strings", []):
+        for instance in getattr(s, "instances", []):
             try:
                 strings_matched.add(instance.matched_data.decode("utf-8", errors="ignore"))
-            except:
+            except Exception:
                 continue
+
+    # persist per-rule artifacts
     fe.ensure_rule_directory(rule)
     fe.save_hashes(rule, file_path)
-    fe.save_strings(rule, list(strings_matched))
-    results["strings"] = sorted(strings_matched)
-    results["rule"] = rule
+    fe.save_strings(rule, sorted(strings_matched))
+
+    # --- aggregate per-rule in results ---
+    results.setdefault("yara_matches", [])
+    results.setdefault("rules", [])
+    results.setdefault("strings", [])
+
+    # append structured match
+    results["yara_matches"].append({
+        "rule": rule,
+        "strings": sorted(strings_matched),
+        "meta": dict(data.get("meta") or {}),
+    })
+
+    # keep flat lists for backward-compat + ease of display
+    if rule not in results["rules"]:
+        results["rules"].append(rule)
+
+    merged = set(results.get("strings", []))
+    merged.update(strings_matched)
+    results["strings"] = sorted(merged)
+
+    # maintain a comma-joined "rule" for code that expects a single string
+    results["rule"] = ", ".join(results["rules"])
+
     results["matches_found"] = True
+
+    # continue scanning other rules
+    return yara.CALLBACK_CONTINUE

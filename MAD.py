@@ -15,6 +15,8 @@ import ctypes
 import ctypes.wintypes as wt
 from itertools import chain
 from tkinter import ttk
+from PIL import Image
+
 from core.case_manager import CaseManager
 from core.traffic import TrafficPanel, TrafficTwoPane
 from yarwatch.dns_extractor_memory import DNSExtractor
@@ -24,7 +26,9 @@ from yarwatch.scanner import run_yara_file, run_yara_pid
 from yarwatch.monitor import Monitor
 from yarwatch.collapsible_frame import CollapsibleScanFrame 
 from yarwatch.yarwatch_panel import YarWatchPanel
-from PIL import Image
+from yarwatch.config import mal_data_dir
+
+
 
 # ========== CONFIG ==========
 destination_path = "C:/Users/REM/Desktop/Case Data"  # where a copy of uploads is stored
@@ -95,7 +99,6 @@ def _extract_ascii_strings(data: bytes, minlen: int):
 def _extract_utf16le_strings(data: bytes, minlen: int):
     out, run = [], bytearray()
     i, n = 0, len(data)
-    # look for pattern: printable byte followed by 0x00
     while i + 1 < n:
         b0, b1 = data[i], data[i+1]
         if 32 <= b0 <= 126 and b1 == 0x00:
@@ -116,9 +119,8 @@ def _extract_utf16le_strings(data: bytes, minlen: int):
             pass
     return out
 
-# add this tiny helper somewhere near UploadedFileRow
 class _NullRow:
-    def __getattr__(self, _):  # any method becomes a no-op
+    def __getattr__(self, _):  
         def _noop(*a, **k): 
             pass
         return _noop
@@ -578,6 +580,7 @@ class ProcessPanel(ctk.CTkFrame):
             except Exception as e:
                 messagebox.showerror("DNS Extract failed", str(e))
         threading.Thread(target=worker, daemon=True).start()
+
 # ========== Main App ==========
 class MalwareDashboard(ctk.CTk):
     def __init__(self):
@@ -585,14 +588,15 @@ class MalwareDashboard(ctk.CTk):
         self.title("MAD - Malware Analysis Dashboard")
         self.geometry("1200x800")
         self.case_manager = CaseManager()
+        self._feature_extractor = FeatureExtractor(mal_data_path=mal_data_dir)
         self.nav_buttons = {}
         self.sections = {}
         self.analysis_tabview = None
         self.analysis_container = None
         self.active_tab = None
         self._ui_rows_by_sha = {}
-        self._pid_header_printed = False  # for Analysis console compact header
-        self.analysis_console = None       # set when Analysis tab is built
+        self._pid_header_printed = False  
+        self.analysis_console = None       
         self.analysis_output_queue = None
         self.analysis_logger = None
         self.analysis_feature_extractor = None
@@ -613,7 +617,35 @@ class MalwareDashboard(ctk.CTk):
                                 command=lambda i=item: self.show_section(i))
             btn.pack(pady=10, padx=10)
             self.nav_buttons[item] = btn
-    # put these inside your Dashboard / MalwareDashboard class
+    def _save_scan_to_case(self, ordered_results: dict):
+        if not ordered_results:
+            return
+
+        file_info = {
+            "file_name": ordered_results.get("file_name"),
+            "md5": ordered_results.get("md5"),
+            "sha256": ordered_results.get("sha256"),
+            "size": ordered_results.get("size"),
+            "imphash": ordered_results.get("imphash"),
+            # Optional but useful context:
+            "rule": ordered_results.get("rule"),
+            "vt_hits": ordered_results.get("vt_hits"),
+            "thq_family": ordered_results.get("thq_family"),
+            "threat_score": ordered_results.get("threat_score"),
+            "risk_level": ordered_results.get("risk_level"),
+            "timestamp": ordered_results.get("timestamp"),
+        }
+
+        cases = self.case_manager.get_all_cases()
+        if not cases:
+            # Try to pull analyst/report URL from your inputs if present; else defaults
+            analyst = getattr(self, "analyst_entry", None)
+            report  = getattr(self, "report_entry", None)
+            analyst_val = analyst.get().strip() if analyst else "analyst"
+            report_val  = report.get().strip() if report else ""
+            self.case_manager.add_case(analyst_val, report_val, file_info)
+        else:
+            self.case_manager.add_file_to_case(file_info)
 
     def _format_file_details(self, file_info: dict) -> str:
         return (
@@ -642,30 +674,56 @@ class MalwareDashboard(ctk.CTk):
             box.configure(state="disabled")
         except Exception:
             pass
-
-    # 1) Put this on your GUI class (MalwareDashboard)
+    @staticmethod   
+    def _fit(text: str, width: int) -> str:
+        """Clamp text to a fixed width; add ellipsis if needed."""
+        text = str(text or "")
+        return text if len(text) <= width else (text[: max(0, width - 1)] + "…")
+           
     def update_collapsible_output(self, results: dict):
         """
         Called by scanner.run_yara_pid/file() when a scan finishes.
-        Writes compact row to Analysis console: FileName : PID : Rule
+        Writes a compact row to the Analysis console:
+        FileName | PID | Rule | VT | THQ | Score(Level) | DNS
         """
-        tgt_type = results.get("target_type")
-        rule = results.get("rule") or "No_YARA_Hit"
-        file_name = results.get("file_name") or results.get("process_name") or "Unknown"
-        pid = results.get("target") if tgt_type == "pid" else "-"
-        line = f"{file_name} : {pid} : {rule}"
+        tgt_type = (results or {}).get("target_type")
+        rule = (results or {}).get("rule") or "No_YARA_Hit"
+        file_name = (results or {}).get("file_name") or (results or {}).get("process_name") or "Unknown"
+        pid = (results or {}).get("target") if tgt_type == "pid" else "-"
 
-        # Clear the old PHRem block and print our compact table header once per session
-        if not self._pid_header_printed and self.analysis_console and self.analysis_console.winfo_exists():
+        vt_hits = (results or {}).get("vt_hits", 0) or 0
+        thq_family = (results or {}).get("thq_family") or "-"
+        score = (results or {}).get("threat_score", 0) or 0
+        level = (results or {}).get("risk_level") or "Low"
+        dns_count = len((results or {}).get("dns_domains") or [])
+
+        sev = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢"}.get(level, "🟢")
+
+        line = (
+            f"{self._fit(file_name, 28):28} | "
+            f"{str(pid):>5} | "
+            f"{self._fit(rule, 24):24} | "
+            f"{str(vt_hits):>3} | "
+            f"{self._fit(thq_family, 18):18} | "
+            f"{str(score):>3} ({self._fit(level, 7):7}) {sev} | "
+            f"{str(dns_count):>3}"
+        )
+
+        if not getattr(self, "_pid_header_printed", False) and self.analysis_console and self.analysis_console.winfo_exists():
             self.analysis_console.configure(state="normal")
             self.analysis_console.delete("1.0", "end")
-            self.analysis_console.insert("end", "File Name : PID : Rule Match\n")
-            self.analysis_console.insert("end", "─" * 60 + "\n")
+            header = (
+                f"{'File Name':28} | {'PID':>5} | {'Rule Match':24} | {'VT':>3} | "
+                f"{'THQ Family':18} | {'Score(Level)':13} | {'DNS':>3}\n"
+                + "─" * 100 + "\n"
+            )
+            self.analysis_console.insert("end", header)
             self.analysis_console.configure(state="disabled")
             self._pid_header_printed = True
 
         self._append_analysis_log(line)
 
+    
     def show_section(self, section_name):
         self.clear_main_area()
         # reset the compact header when moving away/back to Analysis
@@ -1023,20 +1081,24 @@ class MalwareDashboard(ctk.CTk):
             ui(row.start_indeterminate)
             extractor = FeatureExtractor("C:\\Users\\REM\\Desktop\\Mal_Data")
             logger = YarLogger(gui_queue=self.analysis_output_queue)  # tee to console
-            run_yara_file(file_path, self, self, extractor, logger)
+
+            # run and CAPTURE results
+            ordered = run_yara_file(file_path, self, self, extractor, logger)
+
             ui(row.stop_indeterminate)
             ui(row.set_progress, 0.85)
 
             ui(row.set_status, "Updating case…")
-            last = self._read_last_yarwatch_entry()
-            score = last.get("threat_score")
-            level = last.get("risk_level")
+            score = ordered.get("threat_score")
+            level = ordered.get("risk_level")
             if level:
                 ui(row.apply_risk_style, level, score)
 
-            self.case_manager.add_file_to_case(last)
+            # append to current case directly
+            self.case_manager.add_file_to_case(ordered)
             if hasattr(self.case_manager, "save_cases"):
                 self.case_manager.save_cases()
+
 
             ui(row.set_progress, 1.0)
             ui(row.mark_done, True)
@@ -1047,7 +1109,6 @@ class MalwareDashboard(ctk.CTk):
             ui(row.set_status, f"Error: {e}")
             ui(row.mark_done, False)
 
-    # ---------- Delete logic ----------
     def _handle_delete_file_from_row(self, sha256, stored_path_to_delete=None) -> bool:
         try:
             removed = self._delete_file_from_case(sha256)
@@ -1122,10 +1183,6 @@ class MalwareDashboard(ctk.CTk):
             self.show_section("Current Case")
 
 class StringsViewer(ctk.CTkToplevel):
-    """
-    On-demand process-strings viewer with fast 'Quick mode' sampling,
-    ASCII + UTF-16LE detection, search filtering, and Copy All.
-    """
     def __init__(self, master, pid: int):
         super().__init__(master)
         self.title(f"Strings — PID {pid}")
@@ -1584,7 +1641,7 @@ class CombinedAnalysisPanel(ctk.CTkFrame):
         return [l.rstrip("\n") for l in lines]
 
 
-# ========== Entry Point ======
+# ========== Entry Point ==========
 if __name__ == "__main__":
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")

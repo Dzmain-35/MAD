@@ -48,6 +48,8 @@ class YarWatchPanel(ctk.CTkFrame):
         self.stop_process_thread = False
         self.pid_node_map = {}
         self.dashboard_gui = dashboard_gui
+        self._last_scan_key = None  
+
 
         self.grid_rowconfigure(3, weight=1)
         self.grid_rowconfigure(5, weight=1)  
@@ -274,6 +276,11 @@ class YarWatchPanel(ctk.CTkFrame):
         self.process_listbox.yview_moveto(1.0)
 
     def update_collapsible_output(self, result_dict):
+        scan_key = (result_dict.get("target"), result_dict.get("timestamp"))
+        if scan_key and getattr(self, "_last_scan_key", None) == scan_key:
+            return  
+        self._last_scan_key = scan_key
+
         rule = result_dict.get("rule", "")
         score = result_dict.get("threat_score", "--")
         level = result_dict.get("risk_level", "--")
@@ -360,11 +367,41 @@ class YarWatchPanel(ctk.CTkFrame):
 
     def scan_file(self):
         file_path = filedialog.askopenfilename()
-        if file_path:
-            threading.Thread(
-    target=run_yara_file,
-    args=(file_path, self.dashboard_gui, self, self.feature_extractor, self.logger)
-).start()
+        if not file_path:
+            return
+        threading.Thread(target=self._scan_file_worker, args=(file_path,), daemon=True).start()
+
+    def _scan_file_worker(self, file_path):
+        # Run the scan and CAPTURE results
+        ordered = run_yara_file(
+            file_path,
+            self,                # this YarWatchPanel as the "gui" for collapsible output
+            self.feature_extractor,
+            self.logger
+        )
+
+        # Append to current case via the main dashboard (preferred)
+        try:
+            if hasattr(self.dashboard_gui, "_save_scan_to_case"):
+                self.dashboard_gui._save_scan_to_case(ordered)
+            elif hasattr(self.dashboard_gui, "case_manager"):
+                # Fallback: add a minimal record directly
+                minimal = {
+                    "file_name": ordered.get("file_name"),
+                    "md5": ordered.get("md5"),
+                    "sha256": ordered.get("sha256"),
+                    "size": ordered.get("size"),
+                    "imphash": ordered.get("imphash"),
+                    "rule": ordered.get("rule"),
+                    "vt_hits": ordered.get("vt_hits"),
+                    "thq_family": ordered.get("thq_family"),
+                    "threat_score": ordered.get("threat_score"),
+                    "risk_level": ordered.get("risk_level"),
+                    "timestamp": ordered.get("timestamp"),
+                }
+                self.dashboard_gui.case_manager.add_file_to_case(minimal)
+        except Exception as e:
+            self.logger.log(f"[CASE ERROR] {e}")
 
 
     def scan_pid(self):

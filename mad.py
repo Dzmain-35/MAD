@@ -300,8 +300,8 @@ class ForensicAnalysisGUI:
         """Create fallback text-based logo if image.png is not found"""
         logo_shield = ctk.CTkLabel(
             parent_frame,
-            text="🛡",
-            font=ctk.CTkFont(size=80),
+            text="[SHIELD]",
+            font=ctk.CTkFont(size=40, weight="bold"),
             text_color=self.colors["red"]
         )
         logo_shield.pack(side="left", padx=(0, 20))
@@ -374,7 +374,7 @@ class ForensicAnalysisGUI:
                                   text_color="white")
         files_title.pack(side="left", padx=15)
         
-        btn_add_files = ctk.CTkButton(files_header, text="➕ Add Files",
+        btn_add_files = ctk.CTkButton(files_header, text="[+] Add Files",
                                      command=self.handle_add_files,
                                      height=30, width=100,
                                      fg_color=self.colors["red"],
@@ -396,7 +396,7 @@ class ForensicAnalysisGUI:
         notes_title.pack(side="left", padx=15)
         
         # Save notes button
-        btn_save_notes = ctk.CTkButton(notes_header, text="💾 Save Notes",
+        btn_save_notes = ctk.CTkButton(notes_header, text="[SAVE] Notes",
                                       command=self.handle_save_notes,
                                       height=30, width=100,
                                       fg_color=self.colors["red"],
@@ -438,7 +438,7 @@ class ForensicAnalysisGUI:
         subtab_frame.pack(fill="x", padx=20, pady=10)
         
         self.btn_processes = ctk.CTkButton(
-            subtab_frame, text="⚙️ Processes",
+            subtab_frame, text="[PROC] Processes",
             command=lambda: self.show_analysis_subtab("processes"),
             height=35, width=150,
             fg_color=self.colors["red"],
@@ -448,7 +448,7 @@ class ForensicAnalysisGUI:
         self.btn_processes.pack(side="left", padx=5)
         
         self.btn_network = ctk.CTkButton(
-            subtab_frame, text="🌐 Network",
+            subtab_frame, text="[NET] Network",
             command=lambda: self.show_analysis_subtab("network"),
             height=35, width=150,
             fg_color="transparent",
@@ -486,7 +486,7 @@ class ForensicAnalysisGUI:
         
         # Monitor toggle
         self.btn_toggle_process_monitor = ctk.CTkButton(
-            header, text="▶ Start Monitoring",
+            header, text="[>] Start Monitoring",
             command=self.toggle_process_monitoring,
             height=35, width=150,
             fg_color=self.colors["red"],
@@ -496,7 +496,7 @@ class ForensicAnalysisGUI:
         
         # Refresh button
         btn_refresh = ctk.CTkButton(
-            header, text="🔄 Refresh",
+            header, text="[REFRESH]",
             command=self.refresh_process_list,
             height=35, width=100,
             fg_color=self.colors["navy"],
@@ -579,16 +579,16 @@ class ForensicAnalysisGUI:
             relief="flat"
         )
         self.process_context_menu.add_command(
-            label="🔍 Scan with YARA", 
+            label="[SCAN] Scan with YARA",
             command=self.scan_selected_process
         )
         self.process_context_menu.add_command(
-            label="📋 View Details & Strings",  # FIXED: Combined command
+            label="[INFO] View Details & Strings",  # FIXED: Combined command
             command=self.view_process_details_and_strings
         )
         self.process_context_menu.add_separator(background="#444444")
         self.process_context_menu.add_command(
-            label="❌ Kill Process", 
+            label="[X] Kill Process", 
             command=self.kill_selected_process
         )
         
@@ -620,7 +620,7 @@ class ForensicAnalysisGUI:
         
         # Monitor toggle
         self.btn_toggle_network_monitor = ctk.CTkButton(
-            header, text="▶ Start Monitoring",
+            header, text="[>] Start Monitoring",
             command=self.toggle_network_monitoring,
             height=35, width=150,
             fg_color=self.colors["red"],
@@ -630,7 +630,7 @@ class ForensicAnalysisGUI:
         
         # Refresh button
         btn_refresh = ctk.CTkButton(
-            header, text="🔄 Refresh",
+            header, text="[REFRESH]",
             command=self.refresh_network_list,
             height=35, width=100,
             fg_color=self.colors["navy"],
@@ -853,7 +853,7 @@ class ForensicAnalysisGUI:
             # Close progress and show success
             self.root.after(0, self.close_progress_window)
             self.root.after(0, lambda: self.new_case_status.configure(
-                text=f"✓ Case created: {case_data['id']} | Files: {len(files)} | Threats: {case_data['total_threats']}"
+                text=f"[OK] Case created: {case_data['id']} | Files: {len(files)} | Threats: {case_data['total_threats']}"
             ))
             self.root.after(0, lambda: messagebox.showinfo(
                 "Success",
@@ -1093,13 +1093,16 @@ class ForensicAnalysisGUI:
         yara_matches = file_info.get("yara_matches", [])
         thq_family = file_info.get("thq_family", "Unknown")
         is_whitelisted = file_info.get("whitelisted", False)
-        has_threats = len(yara_matches) > 0 or file_info.get("vt_hits", 0) > 0
-        
+
+        # FIXED: Include THQ matches as threat indicator
+        has_thq = thq_family and thq_family not in ["Unknown", "N/A"]
+        has_threats = len(yara_matches) > 0 or file_info.get("vt_hits", 0) > 0 or has_thq
+
         # Determine card color
         if is_whitelisted:
             card_color = "#1a4d2e"  # Dark green for whitelisted
         elif has_threats:
-            card_color = "#5c1c1c"  # Dark red for threats
+            card_color = "#5c1c1c"  # Dark red for threats (YARA, VT, or THQ)
         else:
             card_color = "#2a2a2a"  # Dark gray for clean
         
@@ -1135,10 +1138,13 @@ class ForensicAnalysisGUI:
         
         info_line = f"YARA: {yara_display}  |  THQ: {thq_display}"
         
+        # FIXED: Highlight in red if YARA matches OR THQ family found
+        has_threats_display = (len(yara_matches) > 0) or (thq_family and thq_family not in ["Unknown", "N/A"])
+
         yara_thq_label = ctk.CTkLabel(
-            left_frame, 
+            left_frame,
             text=info_line,
-            text_color=self.colors["red"] if (yara_matches or thq_family != "Unknown") else "gray60", 
+            text_color=self.colors["red"] if has_threats_display else "gray60", 
             font=ctk.CTkFont(size=12, weight="bold"),
             cursor="hand2"
         )
@@ -1170,13 +1176,13 @@ File Size: {file_info['file_size']} bytes"""
             self.root.update()
             
             original_text = copy_btn.cget("text")
-            copy_btn.configure(text="✓ Copied!")
+            copy_btn.configure(text="[OK] Copied!")
             self.root.after(1500, lambda: copy_btn.configure(text=original_text))
             return "break"
         
         copy_btn = ctk.CTkButton(
             right_frame,
-            text="📋 Copy Details",
+            text="[COPY] Details",
             width=120,
             height=28,
             font=ctk.CTkFont(size=11),
@@ -1193,8 +1199,8 @@ File Size: {file_info['file_size']} bytes"""
         
         expand_indicator = ctk.CTkLabel(
             right_frame,
-            text="▼",
-            font=ctk.CTkFont(size=14),
+            text="[v]",
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color="gray60",
             cursor="hand2"
         )
@@ -1203,13 +1209,13 @@ File Size: {file_info['file_size']} bytes"""
         def toggle_details(event=None):
             if details_visible[0]:
                 details_frame.pack_forget()
-                expand_indicator.configure(text="▼")
+                expand_indicator.configure(text="[v]")
                 details_visible[0] = False
             else:
                 if len(details_frame.winfo_children()) == 0:
                     self.populate_file_details(details_frame, file_info)
                 details_frame.pack(fill="both", expand=True, padx=15, pady=(0, 12))
-                expand_indicator.configure(text="▲")
+                expand_indicator.configure(text="[^]")
                 details_visible[0] = True
             card_frame.update_idletasks()
             self.root.update_idletasks()
@@ -1251,6 +1257,16 @@ File Size: {file_info['file_size']} bytes"""
     # ==================== APPLICATION LIFECYCLE ====================
     def run(self):
         """Start the application"""
+        # FIXED: Auto-start process monitoring when MAD starts
+        if not self.process_monitor_active:
+            try:
+                self.process_monitor.start_monitoring()
+                self.process_monitor_active = True
+                self.btn_toggle_process_monitor.configure(text="[||] Stop Monitoring")
+                print("Process monitoring auto-started successfully")
+            except Exception as e:
+                print(f"Failed to auto-start process monitoring: {e}")
+
         self.root.mainloop()
 
     # ==================== PROCESS MONITOR METHODS ====================
@@ -1259,13 +1275,13 @@ File Size: {file_info['file_size']} bytes"""
         if not self.process_monitor_active:
             self.process_monitor.start_monitoring()
             self.process_monitor_active = True
-            self.btn_toggle_process_monitor.configure(text="⏸ Stop Monitoring")
+            self.btn_toggle_process_monitor.configure(text="[||] Stop Monitoring")
             messagebox.showinfo("Monitoring Active", 
                               "Process monitoring started. New processes will be automatically scanned with YARA.")
         else:
             self.process_monitor.stop_monitoring()
             self.process_monitor_active = False
-            self.btn_toggle_process_monitor.configure(text="▶ Start Monitoring")
+            self.btn_toggle_process_monitor.configure(text="[>] Start Monitoring")
     
     def refresh_process_list(self):
         """Refresh the process tree with parent-child hierarchy, preserving expanded state"""
@@ -1361,10 +1377,10 @@ File Size: {file_info['file_size']} bytes"""
                 # Get the actual rule name
                 yara_rule = proc.get('yara_rule', 'Unknown')
                 if yara_rule and yara_rule != 'Unknown':
-                    yara_status = f"⚠️ {yara_rule}"
+                    yara_status = f"[!] {yara_rule}"
                 else:
                     matches = proc.get('yara_matches', 0)
-                    yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
+                    yara_status = f"[!] {matches} matches" if matches else "[!] YES"
                 tags.append('threat')
             
             # Priority 2: Check if system/safe process (GREEN)
@@ -1485,7 +1501,7 @@ File Size: {file_info['file_size']} bytes"""
         
         title = ctk.CTkLabel(
             header,
-            text=f"🔍 {name} (PID {pid})",
+            text=f"[SCAN] {name} (PID {pid})",
             font=ctk.CTkFont(size=20, weight="bold")
         )
         title.pack(side="left", padx=20, pady=15)
@@ -1496,7 +1512,7 @@ File Size: {file_info['file_size']} bytes"""
         
         btn_info = ctk.CTkButton(
             tab_frame,
-            text="📋 Process Info",
+            text="[INFO] Process Info",
             command=lambda: show_tab("info"),
             height=35,
             width=150,
@@ -1507,7 +1523,7 @@ File Size: {file_info['file_size']} bytes"""
         
         btn_strings = ctk.CTkButton(
             tab_frame,
-            text="📄 Strings",
+            text="[DOC] Strings",
             command=lambda: show_tab("strings"),
             height=35,
             width=150,
@@ -1557,7 +1573,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             scan_results = self.process_monitor.monitored_processes[pid].get('scan_results', {})
             if scan_results.get('matches_found'):
                 details += f"\n{'='*80}\n"
-                details += "⚠️ YARA SCAN RESULTS\n"
+                details += "[!] YARA SCAN RESULTS\n"
                 details += f"{'='*80}\n"
                 details += f"Rule Matched: {scan_results.get('rule', 'Unknown')}\n"
                 details += f"Threat Score: {scan_results.get('threat_score', 0)}\n"
@@ -1592,7 +1608,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         
         search_label = ctk.CTkLabel(
             search_frame,
-            text="🔍 Search:",
+            text="[SEARCH]:",
             font=ctk.CTkFont(size=12, weight="bold")
         )
         search_label.pack(side="left", padx=(10, 5))
@@ -1796,7 +1812,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             # Show alert in GUI thread
             def show_alert():
                 alert = ctk.CTkToplevel(self.root)
-                alert.title("⚠️ Threat Detected")
+                alert.title("[!] Threat Detected")
                 alert.geometry("500x300")
                 alert.attributes('-topmost', True)
                 
@@ -1805,7 +1821,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 
                 title = ctk.CTkLabel(
                     frame,
-                    text="⚠️ MALICIOUS PROCESS DETECTED",
+                    text="[!] MALICIOUS PROCESS DETECTED",
                     font=ctk.CTkFont(size=18, weight="bold"),
                     text_color="white"
                 )
@@ -1855,11 +1871,11 @@ Risk Level: {risk_level}"""
         if not self.network_monitor_active:
             self.network_monitor.start_monitoring()
             self.network_monitor_active = True
-            self.btn_toggle_network_monitor.configure(text="⏸ Stop Monitoring")
+            self.btn_toggle_network_monitor.configure(text="[||] Stop Monitoring")
         else:
             self.network_monitor.stop_monitoring()
             self.network_monitor_active = False
-            self.btn_toggle_network_monitor.configure(text="▶ Start Monitoring")
+            self.btn_toggle_network_monitor.configure(text="[>] Start Monitoring")
     
     def refresh_network_list(self):
         """Refresh network connections list"""

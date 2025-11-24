@@ -8,6 +8,7 @@ import os
 import threading
 from analysis_modules.process_monitor import ProcessMonitor
 from analysis_modules.network_monitor import NetworkMonitor
+from analysis_modules.procmon_events import ProcmonLiveMonitor, ProcmonEvent
 import tkinter as tk
 from tkinter import ttk
 
@@ -55,6 +56,9 @@ class ForensicAnalysisGUI:
         # Monitoring states
         self.process_monitor_active = False
         self.network_monitor_active = False
+
+        # Procmon live monitors (PID -> monitor instance)
+        self.procmon_monitors = {}
         
         # Create UI
         self.create_ui()
@@ -1482,6 +1486,19 @@ File Size: {file_info['file_size']} bytes"""
             border_color=self.colors["red"]
         )
         btn_strings.pack(side="left", padx=5)
+
+        btn_events = ctk.CTkButton(
+            tab_frame,
+            text="📊 Live Events",
+            command=lambda: show_tab("events"),
+            height=35,
+            width=150,
+            fg_color="transparent",
+            hover_color=self.colors["navy"],
+            border_width=2,
+            border_color=self.colors["red"]
+        )
+        btn_events.pack(side="left", padx=5)
         
         # Content area
         content_area = ctk.CTkFrame(main_container, fg_color=self.colors["navy"])
@@ -1695,10 +1712,300 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 self.root.after(0, lambda: status_label.configure(text="Error extracting strings"))
         
         threading.Thread(target=extract, daemon=True).start()
-        
+
+        # ===== LIVE EVENTS TAB =====
+        events_frame = ctk.CTkFrame(content_area, fg_color="transparent")
+
+        # Top controls
+        controls_frame = ctk.CTkFrame(events_frame, fg_color=self.colors["navy"], height=60)
+        controls_frame.pack(fill="x", padx=10, pady=10)
+        controls_frame.pack_propagate(False)
+
+        # Start/Stop monitoring button
+        monitor_btn_text = tk.StringVar(value="▶ Start Monitoring")
+        monitor_btn = ctk.CTkButton(
+            controls_frame,
+            textvariable=monitor_btn_text,
+            command=None,  # Will be set later
+            height=35,
+            width=150,
+            fg_color=self.colors["red"],
+            hover_color=self.colors["red_dark"]
+        )
+        monitor_btn.pack(side="left", padx=10)
+
+        # Statistics labels
+        stats_label = ctk.CTkLabel(
+            controls_frame,
+            text="Total: 0 | File: 0 | Network: 0 | Thread: 0 | Process: 0",
+            font=ctk.CTkFont(size=11),
+            text_color="gray60"
+        )
+        stats_label.pack(side="left", padx=20)
+
+        # Export button
+        export_btn = ctk.CTkButton(
+            controls_frame,
+            text="💾 Export",
+            command=None,  # Will be set later
+            height=35,
+            width=100,
+            fg_color="transparent",
+            border_width=2,
+            border_color=self.colors["red"]
+        )
+        export_btn.pack(side="right", padx=10)
+
+        # Clear button
+        clear_btn = ctk.CTkButton(
+            controls_frame,
+            text="🗑 Clear",
+            command=None,  # Will be set later
+            height=35,
+            width=100,
+            fg_color="transparent",
+            border_width=2,
+            border_color=self.colors["red"]
+        )
+        clear_btn.pack(side="right", padx=5)
+
+        # Filter frame
+        filter_frame = ctk.CTkFrame(events_frame, fg_color=self.colors["navy"], height=50)
+        filter_frame.pack(fill="x", padx=10, pady=(0, 10))
+        filter_frame.pack_propagate(False)
+
+        filter_label = ctk.CTkLabel(
+            filter_frame,
+            text="Filter:",
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        filter_label.pack(side="left", padx=10)
+
+        # Filter buttons
+        filter_var = tk.StringVar(value="All")
+        filter_types = ["All", "File", "Network", "Thread", "Process", "Registry"]
+
+        for ftype in filter_types:
+            btn = ctk.CTkButton(
+                filter_frame,
+                text=ftype,
+                command=None,  # Will be set later
+                height=30,
+                width=80,
+                fg_color="transparent" if ftype != "All" else self.colors["red"],
+                hover_color=self.colors["navy"],
+                border_width=1,
+                border_color=self.colors["red"]
+            )
+            btn.pack(side="left", padx=3)
+
+        # Events tree view
+        tree_frame = ctk.CTkFrame(events_frame, fg_color="gray20")
+        tree_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # Scrollbars
+        tree_vsb = tk.Scrollbar(tree_frame, orient="vertical", bg="#1a1a1a")
+        tree_vsb.pack(side="right", fill="y")
+
+        tree_hsb = tk.Scrollbar(tree_frame, orient="horizontal", bg="#1a1a1a")
+        tree_hsb.pack(side="bottom", fill="x")
+
+        # Create tree view for events
+        columns = ("time", "type", "operation", "path", "result")
+        events_tree = ttk.Treeview(
+            tree_frame,
+            columns=columns,
+            show="headings",
+            height=20,
+            yscrollcommand=tree_vsb.set,
+            xscrollcommand=tree_hsb.set
+        )
+
+        # Configure columns
+        events_tree.heading("time", text="Time")
+        events_tree.heading("type", text="Type")
+        events_tree.heading("operation", text="Operation")
+        events_tree.heading("path", text="Path")
+        events_tree.heading("result", text="Result")
+
+        events_tree.column("time", width=100, minwidth=100)
+        events_tree.column("type", width=80, minwidth=80)
+        events_tree.column("operation", width=150, minwidth=100)
+        events_tree.column("path", width=400, minwidth=200)
+        events_tree.column("result", width=100, minwidth=80)
+
+        # Style the tree
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Treeview",
+                       background="#1a1a1a",
+                       foreground="white",
+                       fieldbackground="#1a1a1a",
+                       borderwidth=0)
+        style.configure("Treeview.Heading",
+                       background="#0d1520",
+                       foreground="white",
+                       borderwidth=1)
+        style.map("Treeview",
+                 background=[("selected", "#dc2626")])
+
+        events_tree.pack(side="left", fill="both", expand=True, padx=2, pady=2)
+        tree_vsb.config(command=events_tree.yview)
+        tree_hsb.config(command=events_tree.xview)
+
+        # Store references for event monitoring
+        event_monitor_state = {
+            "monitor": None,
+            "monitoring": False,
+            "filter": "All",
+            "update_job": None
+        }
+
+        def toggle_monitoring():
+            """Start/stop event monitoring for this PID"""
+            if not event_monitor_state["monitoring"]:
+                # Start monitoring
+                try:
+                    # Create and start procmon monitor
+                    monitor = ProcmonLiveMonitor(pid, max_events=5000)
+                    monitor.start_monitoring()
+
+                    self.procmon_monitors[pid] = monitor
+                    event_monitor_state["monitor"] = monitor
+                    event_monitor_state["monitoring"] = True
+
+                    monitor_btn_text.set("⏸ Stop Monitoring")
+                    monitor_btn.configure(fg_color="#059669")  # Green
+
+                    # Start auto-refresh
+                    refresh_events()
+
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to start monitoring: {str(e)}")
+            else:
+                # Stop monitoring
+                if event_monitor_state["monitor"]:
+                    event_monitor_state["monitor"].stop_monitoring()
+                    if pid in self.procmon_monitors:
+                        del self.procmon_monitors[pid]
+
+                event_monitor_state["monitoring"] = False
+                event_monitor_state["monitor"] = None
+
+                monitor_btn_text.set("▶ Start Monitoring")
+                monitor_btn.configure(fg_color=self.colors["red"])
+
+                # Cancel auto-refresh
+                if event_monitor_state["update_job"]:
+                    details_window.after_cancel(event_monitor_state["update_job"])
+                    event_monitor_state["update_job"] = None
+
+        def refresh_events():
+            """Refresh the events display"""
+            if not event_monitor_state["monitoring"] or not event_monitor_state["monitor"]:
+                return
+
+            try:
+                monitor = event_monitor_state["monitor"]
+                filter_type = event_monitor_state["filter"]
+
+                # Get events
+                events = monitor.get_recent_events(count=1000,
+                                                  event_type=None if filter_type == "All" else filter_type)
+
+                # Update tree
+                events_tree.delete(*events_tree.get_children())
+
+                for event in events:
+                    events_tree.insert("", "end", values=(
+                        event['timestamp'],
+                        event['event_type'],
+                        event['operation'],
+                        event['path'][:80] + "..." if len(event['path']) > 80 else event['path'],
+                        event['result']
+                    ))
+
+                # Auto-scroll to bottom
+                if events_tree.get_children():
+                    events_tree.see(events_tree.get_children()[-1])
+
+                # Update statistics
+                stats = monitor.get_stats()
+                stats_label.configure(
+                    text=f"Total: {stats['total_events']} | "
+                         f"File: {stats['file_events']} | "
+                         f"Network: {stats['network_events']} | "
+                         f"Thread: {stats['thread_events']} | "
+                         f"Process: {stats['process_events']}"
+                )
+
+                # Schedule next refresh
+                event_monitor_state["update_job"] = details_window.after(500, refresh_events)
+
+            except Exception as e:
+                print(f"Error refreshing events: {e}")
+
+        def export_events():
+            """Export events to CSV"""
+            if not event_monitor_state["monitor"]:
+                messagebox.showwarning("No Data", "No events to export. Start monitoring first.")
+                return
+
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                initialfile=f"procmon_events_pid_{pid}.csv"
+            )
+
+            if filepath:
+                try:
+                    event_monitor_state["monitor"].export_events(filepath)
+                    messagebox.showinfo("Success", f"Events exported to {filepath}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to export: {str(e)}")
+
+        def clear_events():
+            """Clear all events"""
+            if event_monitor_state["monitor"]:
+                event_monitor_state["monitor"].clear_events()
+                events_tree.delete(*events_tree.get_children())
+                stats_label.configure(text="Total: 0 | File: 0 | Network: 0 | Thread: 0 | Process: 0")
+
+        def set_filter(ftype):
+            """Set event filter"""
+            event_monitor_state["filter"] = ftype
+            # Update button colors
+            for widget in filter_frame.winfo_children():
+                if isinstance(widget, ctk.CTkButton) and widget.cget("text") in filter_types:
+                    if widget.cget("text") == ftype:
+                        widget.configure(fg_color=self.colors["red"])
+                    else:
+                        widget.configure(fg_color="transparent")
+            refresh_events()
+
+        # Connect button commands
+        monitor_btn.configure(command=toggle_monitoring)
+        export_btn.configure(command=export_events)
+        clear_btn.configure(command=clear_events)
+
+        # Connect filter buttons
+        for widget in filter_frame.winfo_children():
+            if isinstance(widget, ctk.CTkButton) and widget.cget("text") in filter_types:
+                ftype = widget.cget("text")
+                widget.configure(command=lambda f=ftype: set_filter(f))
+
+        # Cleanup on window close
+        def on_window_close():
+            """Clean up when window is closed"""
+            if event_monitor_state["monitoring"]:
+                toggle_monitoring()
+            details_window.destroy()
+
+        details_window.protocol("WM_DELETE_WINDOW", on_window_close)
+
         # Tab switching
-        tabs = {"info": info_frame, "strings": strings_frame}
-        buttons = {"info": btn_info, "strings": btn_strings}
+        tabs = {"info": info_frame, "strings": strings_frame, "events": events_frame}
+        buttons = {"info": btn_info, "strings": btn_strings, "events": btn_events}
         
         def show_tab(tab_name):
             for name, frame in tabs.items():

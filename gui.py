@@ -1673,7 +1673,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         def extract():
             try:
                 status_label.configure(text="Extracting strings...")
-                strings = self.process_monitor.extract_strings_from_process(pid, min_length=4, limit=1000)
+                strings = self.process_monitor.extract_strings_from_process(pid, min_length=10, limit=10000)
                 
                 result_text = ""
                 

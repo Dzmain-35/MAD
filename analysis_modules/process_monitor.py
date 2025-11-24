@@ -393,7 +393,7 @@ class ProcessMonitor:
 
         try:
             # Extract strings from process with relaxed filters
-            all_strings = self.extract_strings_from_process(pid, min_length=4, limit=5000)
+            all_strings = self.extract_strings_from_process(pid, min_length=4, limit=10000)
 
             if not all_strings:
                 return
@@ -565,7 +565,8 @@ class ProcessMonitor:
                 all_strings.extend(interesting.get(category, []))
 
             # Add remaining strings from categorized results
-            for str_type in ['urls', 'paths', 'ips', 'registry']:
+            # Environment variables are important for malware analysis
+            for str_type in ['environment', 'urls', 'paths', 'ips', 'registry']:
                 all_strings.extend(results['strings'].get(str_type, []))
 
             # Add general ASCII/Unicode strings if we need more

@@ -11,8 +11,9 @@ import sys
 import platform
 import re
 import psutil
+import math
 from typing import List, Dict, Set, Optional
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 # Check if running on Windows and import Windows-specific modules
 IS_WINDOWS = platform.system() == 'Windows'
@@ -124,11 +125,12 @@ class MemoryStringExtractor:
         min_length: int = 10,
         max_strings: int = 20000,
         include_unicode: bool = True,
-        filter_regions: Optional[List[str]] = None
+        filter_regions: Optional[List[str]] = None,
+        enable_quality_filter: bool = True
     ) -> Dict[str, any]:
         """
         Extract strings from process memory regions
-        
+
         Args:
             pid: Process ID
             min_length: Minimum string length
@@ -136,7 +138,9 @@ class MemoryStringExtractor:
             include_unicode: Include Unicode strings
             filter_regions: List of region types to scan ['private', 'image', 'mapped']
                           If None, scans all readable regions
-        
+            enable_quality_filter: Enable quality filtering to remove low-quality strings
+                                 (entropy, vowel ratio, repetition, truncation checks)
+
         Returns:
             Dictionary containing extracted strings and metadata
         """
@@ -225,7 +229,8 @@ class MemoryStringExtractor:
                                 memory_data,
                                 result['strings'],
                                 min_length,
-                                include_unicode
+                                include_unicode,
+                                enable_quality_filter
                             )
 
                             # Stop if we've collected enough strings
@@ -401,7 +406,8 @@ class MemoryStringExtractor:
         data: bytes,
         string_dict: Dict[str, Set[str]],
         min_length: int,
-        include_unicode: bool
+        include_unicode: bool,
+        enable_quality_filter: bool = True
     ):
         """
         Extract various types of strings from memory buffer
@@ -411,6 +417,7 @@ class MemoryStringExtractor:
             string_dict: Dictionary to store extracted strings
             min_length: Minimum string length
             include_unicode: Whether to extract Unicode strings
+            enable_quality_filter: Whether to apply quality filtering
         """
         if not data:
             return
@@ -428,11 +435,13 @@ class MemoryStringExtractor:
         for match in ascii_pattern.finditer(data):
             try:
                 string = match.group().decode('ascii', errors='ignore')
+                # Apply quality filter if enabled
                 if len(string) >= min_length:
-                    string_dict['ascii'].add(string)
+                    if not enable_quality_filter or self._is_quality_string(string, min_length):
+                        string_dict['ascii'].add(string)
 
-                    # Categorize strings
-                    self._categorize_string(string, string_dict)
+                        # Categorize strings
+                        self._categorize_string(string, string_dict)
 
             except Exception:
                 continue
@@ -449,11 +458,13 @@ class MemoryStringExtractor:
             for match in unicode_pattern.finditer(data):
                 try:
                     string = match.group().decode('utf-16le', errors='ignore')
+                    # Apply quality filter if enabled
                     if len(string) >= min_length:
-                        string_dict['unicode'].add(string)
+                        if not enable_quality_filter or self._is_quality_string(string, min_length):
+                            string_dict['unicode'].add(string)
 
-                        # Categorize strings
-                        self._categorize_string(string, string_dict)
+                            # Categorize strings
+                            self._categorize_string(string, string_dict)
 
                 except Exception:
                     continue
@@ -470,20 +481,188 @@ class MemoryStringExtractor:
         # URLs
         if re.search(r'https?://', string, re.IGNORECASE) or re.search(r'www\.', string, re.IGNORECASE):
             string_dict['urls'].add(string)
-        
+
         # File paths
         elif '\\' in string or (string.count('/') > 1 and len(string) > 10):
             # Windows paths or Unix paths
             if re.match(r'^[a-zA-Z]:\\', string) or string.startswith('\\\\') or string.startswith('/'):
                 string_dict['paths'].add(string)
-        
-        # IP addresses
+
+        # IP addresses (with proper validation)
         elif re.search(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', string):
-            string_dict['ips'].add(string)
-        
+            if self._is_valid_ip(string):
+                string_dict['ips'].add(string)
+
         # Registry keys
         elif string.startswith('HKEY_') or string.startswith('HKLM\\') or string.startswith('HKCU\\'):
             string_dict['registry'].add(string)
+
+    def _calculate_entropy(self, string: str) -> float:
+        """
+        Calculate Shannon entropy of a string
+        Higher entropy = more random/encrypted
+        Lower entropy = more structured/meaningful
+
+        Returns:
+            Entropy value (0.0 to ~8.0 for typical strings)
+        """
+        if not string:
+            return 0.0
+
+        # Count character frequencies
+        char_counts = Counter(string)
+        length = len(string)
+
+        # Calculate Shannon entropy
+        entropy = 0.0
+        for count in char_counts.values():
+            probability = count / length
+            entropy -= probability * math.log2(probability)
+
+        return entropy
+
+    def _get_vowel_ratio(self, string: str) -> float:
+        """
+        Calculate ratio of vowels to total alphabetic characters
+        Real words typically have 30-50% vowels
+
+        Returns:
+            Ratio of vowels (0.0 to 1.0)
+        """
+        if not string:
+            return 0.0
+
+        vowels = 'aeiouAEIOU'
+        alpha_chars = [c for c in string if c.isalpha()]
+
+        if not alpha_chars:
+            return 0.0
+
+        vowel_count = sum(1 for c in alpha_chars if c in vowels)
+        return vowel_count / len(alpha_chars)
+
+    def _has_excessive_repetition(self, string: str) -> bool:
+        """
+        Check if string has excessive character repetition
+
+        Returns:
+            True if string is too repetitive
+        """
+        if len(string) < 4:
+            return False
+
+        # Check for same character repeated
+        char_counts = Counter(string)
+        most_common_char, most_common_count = char_counts.most_common(1)[0]
+
+        # If one character makes up >60% of string, it's too repetitive
+        if most_common_count / len(string) > 0.6:
+            return True
+
+        # Check for repeating patterns (e.g., "ABABAB")
+        for pattern_len in [2, 3]:
+            if len(string) >= pattern_len * 3:
+                pattern = string[:pattern_len]
+                repetitions = string.count(pattern)
+                if repetitions >= len(string) // pattern_len * 0.5:
+                    return True
+
+        return False
+
+    def _is_likely_truncated(self, string: str) -> bool:
+        """
+        Detect if string appears to be truncated or partial
+
+        Returns:
+            True if string looks truncated
+        """
+        # Check for common truncation patterns
+        truncation_indicators = [
+            # Incomplete Windows paths
+            lambda s: re.match(r'^[A-Z]:\\[^\\]*$', s) and len(s) < 15,
+            # Incomplete words (ends mid-word in a path)
+            lambda s: '\\' in s and s.split('\\')[-1] and not s.split('\\')[-1].strip().endswith(('.dll', '.exe', '.txt', '.log')),
+            # Registry path fragments
+            lambda s: s.startswith('\\REGIS') and not s.startswith('\\REGISTRY\\'),
+            # Incomplete common strings
+            lambda s: any(s.startswith(prefix) and len(s) < len(full) for prefix, full in [
+                ('C:\\Win', 'C:\\Windows'),
+                ('C:\\Prog', 'C:\\Program Files'),
+                ('\\Regist', '\\Registry'),
+            ]),
+        ]
+
+        return any(check(string) for check in truncation_indicators)
+
+    def _is_valid_ip(self, string: str) -> bool:
+        """
+        Validate that IP address has valid octets (0-255)
+
+        Returns:
+            True if valid IP address
+        """
+        ip_match = re.search(r'\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b', string)
+        if not ip_match:
+            return False
+
+        try:
+            octets = [int(x) for x in ip_match.groups()]
+            # Check each octet is in valid range
+            return all(0 <= octet <= 255 for octet in octets)
+        except ValueError:
+            return False
+
+    def _is_quality_string(self, string: str, min_length: int = 10) -> bool:
+        """
+        Determine if string meets quality criteria
+
+        Args:
+            string: String to evaluate
+            min_length: Minimum acceptable length
+
+        Returns:
+            True if string passes quality checks
+        """
+        # Basic length check
+        if len(string) < min_length:
+            return False
+
+        # Allow certain types without further filtering
+        # URLs, IPs, registry keys are always kept if properly formatted
+        if re.search(r'https?://', string, re.IGNORECASE):
+            return True
+        if string.startswith('HKEY_') or string.startswith('HKLM\\') or string.startswith('HKCU\\'):
+            return True
+        if re.match(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', string) and self._is_valid_ip(string):
+            return True
+
+        # Check for excessive repetition
+        if self._has_excessive_repetition(string):
+            return False
+
+        # Check if likely truncated
+        if self._is_likely_truncated(string):
+            return False
+
+        # Calculate entropy - reject very high entropy (encrypted/random data)
+        entropy = self._calculate_entropy(string)
+        if entropy > 4.5:  # Threshold for "too random"
+            return False
+
+        # For strings with letters, check vowel ratio
+        alpha_count = sum(1 for c in string if c.isalpha())
+        if alpha_count > len(string) * 0.3:  # If >30% alphabetic
+            vowel_ratio = self._get_vowel_ratio(string)
+            # Reject strings with very few or no vowels (unless they're paths/technical)
+            if vowel_ratio < 0.15 and not ('\\' in string or '/' in string or '.' in string):
+                return False
+
+        # Reject strings that are mostly special characters
+        special_count = sum(1 for c in string if not c.isalnum() and c not in ' \\/:.-_')
+        if special_count > len(string) * 0.4:
+            return False
+
+        return True
     
     def format_results(self, results: Dict) -> str:
         """Format extraction results for display"""

@@ -35,8 +35,8 @@ def test_on_pid(pid: int):
 
         results = extractor.extract_strings_from_memory(
             pid=pid,
-            min_length=4,
-            max_strings=1000,
+            min_length=10,
+            max_strings=20000,
             include_unicode=True,
             filter_regions=['private', 'image', 'mapped']
         )

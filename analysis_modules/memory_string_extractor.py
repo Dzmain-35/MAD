@@ -121,8 +121,8 @@ class MemoryStringExtractor:
     def extract_strings_from_memory(
         self,
         pid: int,
-        min_length: int = 4,
-        max_strings: int = 5000,
+        min_length: int = 10,
+        max_strings: int = 20000,
         include_unicode: bool = True,
         filter_regions: Optional[List[str]] = None
     ) -> Dict[str, any]:
@@ -589,8 +589,8 @@ def test_memory_extraction():
     # Extract strings
     results = extractor.extract_strings_from_memory(
         pid=current_pid,
-        min_length=4,
-        max_strings=1000,
+        min_length=10,
+        max_strings=20000,
         include_unicode=True,
         filter_regions=['private', 'image']
     )

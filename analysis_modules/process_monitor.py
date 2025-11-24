@@ -318,31 +318,68 @@ class ProcessMonitor:
         """Plugin to scan process memory with YARA"""
         pid = ctx["pid"]
         results = ctx["results"]
-        
+
         if not self.yara_rules:
             return
-        
+
         try:
             # Scan process memory directly
             matches = self.yara_rules.match(pid=pid)
-            
+
             if matches:
                 m = matches[0]
                 results["rule"] = m.rule
                 results["matches_found"] = True
-                
-                # Extract matched strings
-                matched_strings = set()
+
+                # Extract matched strings with enhanced details
+                matched_strings = []
+                matched_strings_set = set()
+
                 for string_match in m.strings:
                     for instance in string_match.instances:
                         try:
-                            matched_strings.add(instance.matched_data.decode('utf-8', errors='ignore'))
+                            # Decode the matched data
+                            decoded = instance.matched_data.decode('utf-8', errors='ignore')
+
+                            # Store both the string and its metadata
+                            if decoded not in matched_strings_set:
+                                matched_strings_set.add(decoded)
+                                matched_strings.append({
+                                    'string': decoded,
+                                    'identifier': string_match.identifier,
+                                    'offset': hex(instance.offset),
+                                    'length': len(instance.matched_data)
+                                })
                         except:
-                            continue
-                
-                results["strings"] = sorted(list(matched_strings))[:10]  # First 10 for display
+                            # Try other encodings if UTF-8 fails
+                            try:
+                                decoded = instance.matched_data.decode('latin-1', errors='ignore')
+                                if decoded and decoded not in matched_strings_set:
+                                    matched_strings_set.add(decoded)
+                                    matched_strings.append({
+                                        'string': decoded,
+                                        'identifier': string_match.identifier,
+                                        'offset': hex(instance.offset),
+                                        'length': len(instance.matched_data)
+                                    })
+                            except:
+                                continue
+
+                # Store matched strings with metadata
+                results["matched_strings"] = matched_strings
+
+                # Also store simple string list for backward compatibility
+                results["strings"] = [s['string'] for s in matched_strings][:20]
+
+                # Enhanced output
                 print(f"[YARA] Memory scan matched rule: {m.rule} for PID {pid}")
-                
+                if matched_strings:
+                    print(f"[YARA] Matched strings ({len(matched_strings)} total):")
+                    for i, match_info in enumerate(matched_strings[:5], 1):  # Show first 5
+                        print(f"  {i}. [{match_info['identifier']}] '{match_info['string']}' at {match_info['offset']}")
+                    if len(matched_strings) > 5:
+                        print(f"  ... and {len(matched_strings) - 5} more")
+
         except Exception as e:
             print(f"[ERROR] YARA memory scan failed for PID {pid}: {e}")
     
@@ -350,51 +387,67 @@ class ProcessMonitor:
         """Plugin to do fallback YARA scan on extracted strings"""
         pid = ctx["pid"]
         results = ctx["results"]
-        
+
         if results.get("matches_found"):
             return  # Already found match in memory
-        
+
         try:
-            # Extract strings from process
+            # Extract strings from process with relaxed filters
             all_strings = self.extract_strings_from_process(pid, min_length=4, limit=5000)
-            
+
             if not all_strings:
                 return
-            
+
             # Write strings to temp file
             os.makedirs("temp", exist_ok=True)
             temp_path = os.path.join("temp", f"pid_{pid}_fallback.txt")
-            
+
             with open(temp_path, 'w', encoding='utf-8', errors='ignore') as f:
                 f.write("\n".join(all_strings))
-            
+
             # Scan with YARA
             if self.yara_rules:
                 matches = self.yara_rules.match(filepath=temp_path)
-                
+
                 if matches:
                     m = matches[0]
                     results["rule"] = m.rule
                     results["matches_found"] = True
-                    
-                    # Get matched strings from file
-                    matched_strings = set()
+
+                    # Get matched strings from file with enhanced details
+                    matched_strings = []
+                    matched_strings_set = set()
+
                     for string_match in m.strings:
                         for instance in string_match.instances:
                             try:
-                                matched_strings.add(instance.matched_data.decode('utf-8', errors='ignore'))
+                                decoded = instance.matched_data.decode('utf-8', errors='ignore')
+                                if decoded not in matched_strings_set:
+                                    matched_strings_set.add(decoded)
+                                    matched_strings.append({
+                                        'string': decoded,
+                                        'identifier': string_match.identifier,
+                                        'length': len(instance.matched_data)
+                                    })
                             except:
                                 continue
-                    
-                    results["strings"] = sorted(list(matched_strings))[:10]
+
+                    # Store matched strings with metadata
+                    results["matched_strings"] = matched_strings
+                    results["strings"] = [s['string'] for s in matched_strings][:20]
+
                     print(f"[YARA] Fallback scan matched rule: {m.rule} for PID {pid}")
-            
+                    if matched_strings:
+                        print(f"[YARA] Matched strings ({len(matched_strings)} total):")
+                        for i, match_info in enumerate(matched_strings[:5], 1):
+                            print(f"  {i}. [{match_info['identifier']}] '{match_info['string']}'")
+
             # Clean up temp file
             try:
                 os.remove(temp_path)
             except:
                 pass
-                
+
         except Exception as e:
             print(f"[ERROR] Fallback YARA scan failed for PID {pid}: {e}")
     
@@ -471,53 +524,70 @@ class ProcessMonitor:
         else:
             return self._extract_strings_from_file(pid, min_length, limit)
     
-    def _extract_strings_from_memory(self, pid: int, min_length: int, limit: int) -> List[str]:
+    def _extract_strings_from_memory(self, pid: int, min_length: int, limit: int, yara_matched_strings: Optional[List[str]] = None) -> List[str]:
         """
         Enhanced memory-based string extraction using Windows API
+
+        Args:
+            pid: Process ID
+            min_length: Minimum string length
+            limit: Maximum number of strings
+            yara_matched_strings: YARA-matched strings to always include (bypasses filters)
         """
         try:
-            # Extract strings from process memory
+            # Extract strings from process memory with relaxed min_length to catch more
+            # Use min_length of 4 to catch short malware indicators
+            extraction_min_length = min(min_length, 4)
+
             results = self.memory_extractor.extract_strings_from_memory(
                 pid=pid,
-                min_length=min_length,
+                min_length=extraction_min_length,
                 max_strings=limit,
                 include_unicode=True,
-                filter_regions=['private', 'image', 'mapped']  # Scan all region types
+                filter_regions=['private', 'image', 'mapped'],  # Scan all region types
+                enable_quality_filter=False  # Disable quality filter to catch all strings
             )
-            
+
             # Combine all string types into a single list
             all_strings = []
-            
+
+            # FIRST: Add YARA-matched strings at the top (highest priority)
+            if yara_matched_strings:
+                print(f"[MemoryExtractor] Including {len(yara_matched_strings)} YARA-matched strings")
+                all_strings.extend(yara_matched_strings)
+
             # Prioritize interesting strings
             interesting = self.memory_extractor.get_interesting_strings(results)
-            
+
             # Add in priority order: suspicious, network, commands, crypto, files
             priority_order = ['suspicious', 'network', 'commands', 'crypto', 'files']
             for category in priority_order:
                 all_strings.extend(interesting.get(category, []))
-            
+
             # Add remaining strings from categorized results
             for str_type in ['urls', 'paths', 'ips', 'registry']:
                 all_strings.extend(results['strings'].get(str_type, []))
-            
+
             # Add general ASCII/Unicode strings if we need more
             if len(all_strings) < limit:
                 remaining = limit - len(all_strings)
                 all_strings.extend(list(results['strings'].get('ascii', []))[:remaining // 2])
                 all_strings.extend(list(results['strings'].get('unicode', []))[:remaining // 2])
-            
-            # Remove duplicates while preserving order
+
+            # Remove duplicates while preserving order (keep first occurrence)
             seen = set()
             unique_strings = []
             for s in all_strings:
-                if s not in seen and len(s) >= min_length:
-                    seen.add(s)
-                    unique_strings.append(s)
-                    if len(unique_strings) >= limit:
-                        break
-            
+                # Keep YARA matches regardless of length, apply min_length to others
+                if s not in seen:
+                    if (yara_matched_strings and s in yara_matched_strings) or len(s) >= min_length:
+                        seen.add(s)
+                        unique_strings.append(s)
+                        if len(unique_strings) >= limit:
+                            break
+
             return unique_strings
-            
+
         except Exception as e:
             print(f"Error in memory-based string extraction for PID {pid}: {e}")
             # Fallback to file-based extraction

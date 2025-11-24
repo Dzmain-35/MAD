@@ -18,11 +18,11 @@ from datetime import datetime
 
 # Enhanced memory extraction support
 try:
-    from memory_string_extractor import MemoryStringExtractor
+    from .memory_string_extractor import MemoryStringExtractor
     MEMORY_EXTRACTION_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError) as e:
     MEMORY_EXTRACTION_AVAILABLE = False
-    print("WARNING: Memory string extractor not available. Using fallback method.")
+    print(f"WARNING: Memory string extractor not available ({e}). Using fallback method.")
 
 
 class ProcessMonitor:

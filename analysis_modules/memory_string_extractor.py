@@ -2,7 +2,17 @@
 Enhanced Memory String Extractor for Process Monitor
 Implements dynamic string extraction from process memory similar to Process Hacker
 Uses Windows API to read process memory regions directly
+
+NOTE: This module requires Windows platform. On Linux/Unix systems,
+the fallback method will be used instead.
 """
+
+import sys
+import platform
+
+# Check if running on Windows
+if platform.system() != 'Windows':
+    raise ImportError(f"Memory string extractor requires Windows. Current platform: {platform.system()}")
 
 import ctypes
 from ctypes import wintypes

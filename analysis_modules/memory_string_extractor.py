@@ -9,17 +9,21 @@ the fallback method will be used instead.
 
 import sys
 import platform
-
-# Check if running on Windows
-if platform.system() != 'Windows':
-    raise ImportError(f"Memory string extractor requires Windows. Current platform: {platform.system()}")
-
-import ctypes
-from ctypes import wintypes
 import re
 import psutil
 from typing import List, Dict, Set, Optional
 from collections import defaultdict
+
+# Check if running on Windows and import Windows-specific modules
+IS_WINDOWS = platform.system() == 'Windows'
+
+if IS_WINDOWS:
+    import ctypes
+    from ctypes import wintypes
+else:
+    # Define dummy types for non-Windows platforms
+    ctypes = None
+    wintypes = None
 
 # Windows API Constants
 PROCESS_QUERY_INFORMATION = 0x0400
@@ -38,47 +42,55 @@ PAGE_EXECUTE_READWRITE = 0x40
 PAGE_EXECUTE_WRITECOPY = 0x80
 PAGE_GUARD = 0x100
 
-# Windows API Structures
-class MEMORY_BASIC_INFORMATION(ctypes.Structure):
-    _fields_ = [
-        ("BaseAddress", ctypes.c_void_p),
-        ("AllocationBase", ctypes.c_void_p),
-        ("AllocationProtect", wintypes.DWORD),
-        ("RegionSize", ctypes.c_size_t),
-        ("State", wintypes.DWORD),
-        ("Protect", wintypes.DWORD),
-        ("Type", wintypes.DWORD),
+# Windows API Structures (only on Windows)
+if IS_WINDOWS:
+    class MEMORY_BASIC_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("BaseAddress", ctypes.c_void_p),
+            ("AllocationBase", ctypes.c_void_p),
+            ("AllocationProtect", wintypes.DWORD),
+            ("RegionSize", ctypes.c_size_t),
+            ("State", wintypes.DWORD),
+            ("Protect", wintypes.DWORD),
+            ("Type", wintypes.DWORD),
+        ]
+
+    # Load Windows API functions
+    kernel32 = ctypes.windll.kernel32
+
+    OpenProcess = kernel32.OpenProcess
+    OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    OpenProcess.restype = wintypes.HANDLE
+
+    CloseHandle = kernel32.CloseHandle
+    CloseHandle.argtypes = [wintypes.HANDLE]
+    CloseHandle.restype = wintypes.BOOL
+
+    VirtualQueryEx = kernel32.VirtualQueryEx
+    VirtualQueryEx.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPCVOID,
+        ctypes.POINTER(MEMORY_BASIC_INFORMATION),
+        ctypes.c_size_t
     ]
+    VirtualQueryEx.restype = ctypes.c_size_t
 
-# Load Windows API functions
-kernel32 = ctypes.windll.kernel32
-
-OpenProcess = kernel32.OpenProcess
-OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-OpenProcess.restype = wintypes.HANDLE
-
-CloseHandle = kernel32.CloseHandle
-CloseHandle.argtypes = [wintypes.HANDLE]
-CloseHandle.restype = wintypes.BOOL
-
-VirtualQueryEx = kernel32.VirtualQueryEx
-VirtualQueryEx.argtypes = [
-    wintypes.HANDLE,
-    wintypes.LPCVOID,
-    ctypes.POINTER(MEMORY_BASIC_INFORMATION),
-    ctypes.c_size_t
-]
-VirtualQueryEx.restype = ctypes.c_size_t
-
-ReadProcessMemory = kernel32.ReadProcessMemory
-ReadProcessMemory.argtypes = [
-    wintypes.HANDLE,
-    wintypes.LPCVOID,
-    wintypes.LPVOID,
-    ctypes.c_size_t,
-    ctypes.POINTER(ctypes.c_size_t)
-]
-ReadProcessMemory.restype = wintypes.BOOL
+    ReadProcessMemory = kernel32.ReadProcessMemory
+    ReadProcessMemory.argtypes = [
+        wintypes.HANDLE,
+        wintypes.LPCVOID,
+        wintypes.LPVOID,
+        ctypes.c_size_t,
+        ctypes.POINTER(ctypes.c_size_t)
+    ]
+    ReadProcessMemory.restype = wintypes.BOOL
+else:
+    # Dummy definitions for non-Windows
+    MEMORY_BASIC_INFORMATION = None
+    OpenProcess = None
+    CloseHandle = None
+    VirtualQueryEx = None
+    ReadProcessMemory = None
 
 
 class MemoryStringExtractor:
@@ -86,12 +98,25 @@ class MemoryStringExtractor:
     Enhanced string extractor that reads directly from process memory
     Similar to Process Hacker's memory search functionality
     """
-    
-    def __init__(self):
+
+    def __init__(self, verbose: bool = False):
+        """
+        Initialize the memory string extractor
+
+        Args:
+            verbose: Enable verbose logging
+        """
+        if not IS_WINDOWS:
+            raise RuntimeError("MemoryStringExtractor requires Windows platform")
+
+        self.verbose = verbose
         self.string_patterns = {
             'ascii': re.compile(rb'[\x20-\x7E]{4,}'),
             'unicode': re.compile(rb'(?:[\x20-\x7E]\x00){4,}'),
         }
+
+        if self.verbose:
+            print(f"[MemoryExtractor] Initialized on {platform.system()}")
     
     def extract_strings_from_memory(
         self,
@@ -140,19 +165,30 @@ class MemoryStringExtractor:
                 False,
                 pid
             )
-            
+
             if not h_process:
-                result['errors'].append(f"Failed to open process {pid}")
+                error_msg = f"Failed to open process {pid} (Access Denied or Invalid PID)"
+                result['errors'].append(error_msg)
+                if self.verbose:
+                    print(f"[MemoryExtractor] {error_msg}")
                 return result
+
+            if self.verbose:
+                print(f"[MemoryExtractor] Successfully opened process {pid}")
             
             try:
                 # Enumerate memory regions
                 address = 0
                 max_address = 0x7FFFFFFF0000  # Maximum user-mode address on x64
-                
+                regions_scanned = 0
+                regions_read = 0
+
+                if self.verbose:
+                    print(f"[MemoryExtractor] Starting memory scan for PID {pid}...")
+
                 while address < max_address:
                     mbi = MEMORY_BASIC_INFORMATION()
-                    
+
                     # Query memory region
                     if VirtualQueryEx(
                         h_process,
@@ -160,10 +196,13 @@ class MemoryStringExtractor:
                         ctypes.byref(mbi),
                         ctypes.sizeof(mbi)
                     ) == 0:
+                        if self.verbose:
+                            print(f"[MemoryExtractor] VirtualQueryEx returned 0, stopping enumeration")
                         break
-                    
+
                     # Check if region is readable and matches filter
                     if self._is_readable_region(mbi) and self._should_scan_region(mbi, filter_regions):
+                        regions_scanned += 1
                         region_info = {
                             'base': hex(mbi.BaseAddress),
                             'size': mbi.RegionSize,
@@ -171,13 +210,14 @@ class MemoryStringExtractor:
                             'protection': self._get_protection_string(mbi.Protect)
                         }
                         result['memory_regions'].append(region_info)
-                        
+
                         # Read memory from this region
                         memory_data = self._read_memory_region(h_process, mbi)
-                        
+
                         if memory_data:
+                            regions_read += 1
                             result['total_bytes_scanned'] += len(memory_data)
-                            
+
                             # Extract strings from memory data
                             self._extract_strings_from_buffer(
                                 memory_data,
@@ -185,29 +225,60 @@ class MemoryStringExtractor:
                                 min_length,
                                 include_unicode
                             )
-                            
+
                             # Stop if we've collected enough strings
                             total_strings = sum(len(s) for s in result['strings'].values())
                             if total_strings >= max_strings:
+                                if self.verbose:
+                                    print(f"[MemoryExtractor] Reached max strings limit ({max_strings})")
                                 break
-                    
+                        else:
+                            if self.verbose and regions_scanned <= 5:  # Only log first few failures
+                                print(f"[MemoryExtractor] Failed to read memory at {hex(mbi.BaseAddress)}")
+
                     # Move to next region
                     address = mbi.BaseAddress + mbi.RegionSize
-                    
+
                     # Safety check to prevent infinite loop
                     if mbi.RegionSize == 0:
                         address += 0x1000  # Move by page size
+
+                if self.verbose:
+                    print(f"[MemoryExtractor] Scanned {regions_scanned} regions, successfully read {regions_read} regions")
+                    print(f"[MemoryExtractor] Total bytes scanned: {result['total_bytes_scanned']:,}")
+                    total_strings = sum(len(s) for s in result['strings'].values())
+                    print(f"[MemoryExtractor] Total strings extracted: {total_strings}")
             
             finally:
                 CloseHandle(h_process)
         
         except Exception as e:
-            result['errors'].append(f"Error scanning process {pid}: {str(e)}")
-        
+            error_msg = f"Error scanning process {pid}: {str(e)}"
+            result['errors'].append(error_msg)
+            if self.verbose:
+                print(f"[MemoryExtractor] {error_msg}")
+                import traceback
+                traceback.print_exc()
+
         # Convert sets to sorted lists and limit
         for key in result['strings']:
             result['strings'][key] = sorted(list(result['strings'][key]))[:max_strings // 5]
-        
+
+        # Validate results
+        total_extracted = sum(len(s) for s in result['strings'].values())
+        if total_extracted == 0:
+            warning_msg = f"WARNING: No strings extracted from PID {pid}"
+            if result['total_bytes_scanned'] == 0:
+                warning_msg += " (no memory was scanned - possible permission issue)"
+            elif len(result['memory_regions']) == 0:
+                warning_msg += " (no readable memory regions found)"
+            else:
+                warning_msg += f" (scanned {result['total_bytes_scanned']:,} bytes from {len(result['memory_regions'])} regions)"
+
+            result['errors'].append(warning_msg)
+            if self.verbose or True:  # Always show this warning
+                print(f"[MemoryExtractor] {warning_msg}")
+
         return result
     
     def _is_readable_region(self, mbi: MEMORY_BASIC_INFORMATION) -> bool:
@@ -269,39 +340,53 @@ class MemoryStringExtractor:
     
     def _read_memory_region(
         self,
-        h_process: wintypes.HANDLE,
-        mbi: MEMORY_BASIC_INFORMATION,
+        h_process,
+        mbi,
         max_chunk_size: int = 1024 * 1024  # 1MB chunks
     ) -> Optional[bytes]:
         """
         Read memory from a specific region
-        
+
         Args:
             h_process: Process handle
             mbi: Memory region information
             max_chunk_size: Maximum size to read at once
-        
+
         Returns:
             Bytes read from memory or None on error
         """
         try:
             size_to_read = min(mbi.RegionSize, max_chunk_size)
+
+            # Skip empty regions
+            if size_to_read == 0:
+                return None
+
             buffer = ctypes.create_string_buffer(size_to_read)
             bytes_read = ctypes.c_size_t()
-            
-            if ReadProcessMemory(
+
+            success = ReadProcessMemory(
                 h_process,
                 ctypes.c_void_p(mbi.BaseAddress),
                 buffer,
                 size_to_read,
                 ctypes.byref(bytes_read)
-            ):
+            )
+
+            if success and bytes_read.value > 0:
                 return buffer.raw[:bytes_read.value]
-            
+            elif self.verbose:
+                # Log first few failures for debugging
+                import random
+                if random.random() < 0.01:  # Log 1% of failures to avoid spam
+                    print(f"[MemoryExtractor] ReadProcessMemory failed at {hex(mbi.BaseAddress)}, bytes_read: {bytes_read.value}")
+
         except Exception as e:
-            # Silent fail - some regions may not be readable
-            pass
-        
+            if self.verbose:
+                import random
+                if random.random() < 0.01:  # Log 1% of exceptions
+                    print(f"[MemoryExtractor] Exception reading memory at {hex(mbi.BaseAddress)}: {e}")
+
         return None
     
     def _extract_strings_from_buffer(
@@ -313,46 +398,65 @@ class MemoryStringExtractor:
     ):
         """
         Extract various types of strings from memory buffer
-        
+
         Args:
             data: Memory buffer
             string_dict: Dictionary to store extracted strings
             min_length: Minimum string length
             include_unicode: Whether to extract Unicode strings
         """
+        if not data:
+            return
+
+        strings_before = sum(len(s) for s in string_dict.values())
+
         # Extract ASCII strings
-        pattern = rb'[\x20-\x7E]{' + str(min_length).encode() + rb',}'
-        ascii_pattern = re.compile(pattern)
-        
+        # Use custom pattern for different min_length, or pre-compiled for length 4
+        if min_length == 4:
+            ascii_pattern = self.string_patterns['ascii']
+        else:
+            pattern = rb'[\x20-\x7E]{' + str(min_length).encode() + rb',}'
+            ascii_pattern = re.compile(pattern)
+
         for match in ascii_pattern.finditer(data):
             try:
                 string = match.group().decode('ascii', errors='ignore')
                 if len(string) >= min_length:
                     string_dict['ascii'].add(string)
-                    
+
                     # Categorize strings
                     self._categorize_string(string, string_dict)
-                    
-            except:
-                pass
-        
+
+            except Exception:
+                continue
+
         # Extract Unicode strings (UTF-16LE)
         if include_unicode:
-            # Look for null-terminated wide strings
-            unicode_pattern = rb'(?:[\x20-\x7E]\x00){' + str(min_length).encode() + rb',}'
-            unicode_re = re.compile(unicode_pattern)
-            
-            for match in unicode_re.finditer(data):
+            # Use custom pattern for different min_length, or pre-compiled for length 4
+            if min_length == 4:
+                unicode_pattern = self.string_patterns['unicode']
+            else:
+                unicode_pattern = rb'(?:[\x20-\x7E]\x00){' + str(min_length).encode() + rb',}'
+                unicode_pattern = re.compile(unicode_pattern)
+
+            for match in unicode_pattern.finditer(data):
                 try:
                     string = match.group().decode('utf-16le', errors='ignore')
                     if len(string) >= min_length:
                         string_dict['unicode'].add(string)
-                        
+
                         # Categorize strings
                         self._categorize_string(string, string_dict)
-                        
-                except:
-                    pass
+
+                except Exception:
+                    continue
+
+        # Log if verbose and we found strings
+        if self.verbose:
+            strings_after = sum(len(s) for s in string_dict.values())
+            strings_found = strings_after - strings_before
+            if strings_found > 0 and strings_before < 100:  # Log first few buffers with strings
+                print(f"[MemoryExtractor] Found {strings_found} strings in {len(data):,} byte buffer")
     
     def _categorize_string(self, string: str, string_dict: Dict[str, Set[str]]):
         """Categorize strings into specific types (URLs, paths, IPs, etc.)"""

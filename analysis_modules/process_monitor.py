@@ -46,10 +46,16 @@ class ProcessMonitor:
         
         # Initialize memory extractor if available
         if MEMORY_EXTRACTION_AVAILABLE:
-            self.memory_extractor = MemoryStringExtractor()
-            print("✓ Memory string extractor initialized")
+            try:
+                # Enable verbose mode to see what's happening
+                self.memory_extractor = MemoryStringExtractor(verbose=True)
+                print("✓ Memory string extractor initialized (verbose mode enabled)")
+            except Exception as e:
+                print(f"ERROR: Failed to initialize memory extractor: {e}")
+                self.memory_extractor = None
         else:
             self.memory_extractor = None
+            print("ℹ Memory string extractor not available, using fallback method")
         
         # Load YARA rules
         self.load_yara_rules()

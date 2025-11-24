@@ -203,8 +203,10 @@ class MemoryStringExtractor:
                     # Check if region is readable and matches filter
                     if self._is_readable_region(mbi) and self._should_scan_region(mbi, filter_regions):
                         regions_scanned += 1
+                        # Handle None for BaseAddress (represents address 0 in ctypes)
+                        base_addr = mbi.BaseAddress if mbi.BaseAddress is not None else 0
                         region_info = {
-                            'base': hex(mbi.BaseAddress),
+                            'base': hex(base_addr),
                             'size': mbi.RegionSize,
                             'type': self._get_region_type(mbi),
                             'protection': self._get_protection_string(mbi.Protect)
@@ -234,10 +236,13 @@ class MemoryStringExtractor:
                                 break
                         else:
                             if self.verbose and regions_scanned <= 5:  # Only log first few failures
-                                print(f"[MemoryExtractor] Failed to read memory at {hex(mbi.BaseAddress)}")
+                                base_addr = mbi.BaseAddress if mbi.BaseAddress is not None else 0
+                                print(f"[MemoryExtractor] Failed to read memory at {hex(base_addr)}")
 
                     # Move to next region
-                    address = mbi.BaseAddress + mbi.RegionSize
+                    # Handle None for BaseAddress (represents address 0 in ctypes)
+                    base_addr = mbi.BaseAddress if mbi.BaseAddress is not None else 0
+                    address = base_addr + mbi.RegionSize
 
                     # Safety check to prevent infinite loop
                     if mbi.RegionSize == 0:
@@ -379,13 +384,15 @@ class MemoryStringExtractor:
                 # Log first few failures for debugging
                 import random
                 if random.random() < 0.01:  # Log 1% of failures to avoid spam
-                    print(f"[MemoryExtractor] ReadProcessMemory failed at {hex(mbi.BaseAddress)}, bytes_read: {bytes_read.value}")
+                    base_addr = mbi.BaseAddress if mbi.BaseAddress is not None else 0
+                    print(f"[MemoryExtractor] ReadProcessMemory failed at {hex(base_addr)}, bytes_read: {bytes_read.value}")
 
         except Exception as e:
             if self.verbose:
                 import random
                 if random.random() < 0.01:  # Log 1% of exceptions
-                    print(f"[MemoryExtractor] Exception reading memory at {hex(mbi.BaseAddress)}: {e}")
+                    base_addr = mbi.BaseAddress if mbi.BaseAddress is not None else 0
+                    print(f"[MemoryExtractor] Exception reading memory at {hex(base_addr)}: {e}")
 
         return None
     

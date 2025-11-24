@@ -1566,36 +1566,98 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         
         # ===== STRINGS TAB =====
         strings_frame = ctk.CTkFrame(content_area, fg_color="transparent")
-        
-        # Search bar
-        search_frame = ctk.CTkFrame(strings_frame, fg_color=self.colors["navy"], height=50)
+
+        # Search and filter controls
+        search_frame = ctk.CTkFrame(strings_frame, fg_color=self.colors["navy"], height=90)
         search_frame.pack(fill="x", padx=10, pady=10)
         search_frame.pack_propagate(False)
-        
+
+        # First row: Search
+        search_row = ctk.CTkFrame(search_frame, fg_color="transparent")
+        search_row.pack(fill="x", padx=5, pady=(5, 0))
+
         search_label = ctk.CTkLabel(
-            search_frame,
+            search_row,
             text="🔍 Search:",
             font=ctk.CTkFont(size=12, weight="bold")
         )
         search_label.pack(side="left", padx=(10, 5))
-        
+
         search_entry = ctk.CTkEntry(
-            search_frame,
+            search_row,
             width=300,
             height=35,
             placeholder_text="Enter search term...",
             font=ctk.CTkFont(size=12)
         )
         search_entry.pack(side="left", padx=5)
-        
+
         # Status label
         status_label = ctk.CTkLabel(
-            search_frame,
+            search_row,
             text="Extracting strings...",
             font=ctk.CTkFont(size=11),
             text_color="gray60"
         )
         status_label.pack(side="left", padx=20)
+
+        # Second row: Length filter and refresh button
+        filter_row = ctk.CTkFrame(search_frame, fg_color="transparent")
+        filter_row.pack(fill="x", padx=5, pady=(5, 5))
+
+        # Length filter
+        length_label = ctk.CTkLabel(
+            filter_row,
+            text="📏 Length:",
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        length_label.pack(side="left", padx=(10, 5))
+
+        min_label = ctk.CTkLabel(
+            filter_row,
+            text="Min:",
+            font=ctk.CTkFont(size=11)
+        )
+        min_label.pack(side="left", padx=(5, 2))
+
+        min_length_entry = ctk.CTkEntry(
+            filter_row,
+            width=60,
+            height=30,
+            placeholder_text="4",
+            font=ctk.CTkFont(size=11)
+        )
+        min_length_entry.insert(0, "4")
+        min_length_entry.pack(side="left", padx=2)
+
+        max_label = ctk.CTkLabel(
+            filter_row,
+            text="Max:",
+            font=ctk.CTkFont(size=11)
+        )
+        max_label.pack(side="left", padx=(10, 2))
+
+        max_length_entry = ctk.CTkEntry(
+            filter_row,
+            width=60,
+            height=30,
+            placeholder_text="∞",
+            font=ctk.CTkFont(size=11)
+        )
+        max_length_entry.pack(side="left", padx=2)
+
+        # Refresh button
+        refresh_btn = ctk.CTkButton(
+            filter_row,
+            text="🔄 Refresh Strings",
+            command=lambda: None,  # Will be set later
+            height=30,
+            width=140,
+            fg_color=self.colors["red"],
+            hover_color=self.colors["red_dark"],
+            font=ctk.CTkFont(size=11, weight="bold")
+        )
+        refresh_btn.pack(side="left", padx=15)
         
         # Strings text area
         strings_text_frame = ctk.CTkFrame(strings_frame, fg_color="gray20")
@@ -1622,67 +1684,110 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         
         # Store original strings
         all_strings_data = {"strings": [], "original_text": ""}
-        
+
         def search_strings(event=None):
-            """Search and highlight strings"""
+            """Search and highlight strings with length filtering"""
             search_term = search_entry.get().strip().lower()
+
+            # Get length filter values
+            try:
+                min_len = int(min_length_entry.get()) if min_length_entry.get() else 0
+            except ValueError:
+                min_len = 0
+
+            try:
+                max_len = int(max_length_entry.get()) if max_length_entry.get() else float('inf')
+            except ValueError:
+                max_len = float('inf')
+
             strings_text.configure(state="normal")
             strings_text.delete("1.0", "end")
-            
+
+            # Apply length filter first
+            length_filtered = [s for s in all_strings_data["strings"] if min_len <= len(s) <= max_len]
+
             if not search_term:
-                # Show all strings
-                strings_text.insert("1.0", all_strings_data["original_text"])
-                status_label.configure(text=f"Total: {len(all_strings_data['strings'])} strings")
+                # Show all strings (with length filter applied)
+                if length_filtered:
+                    display_text = "\n".join(length_filtered[:1000])  # Limit display for performance
+                    strings_text.insert("1.0", display_text)
+                    filter_msg = ""
+                    if min_len > 0 or max_len < float('inf'):
+                        filter_msg = f" (filtered by length: {min_len}-{max_len if max_len != float('inf') else '∞'})"
+                    status_label.configure(text=f"Showing: {len(length_filtered)} strings{filter_msg}")
+                else:
+                    strings_text.insert("1.0", "No strings match the length filter")
+                    status_label.configure(text="No matches")
             else:
-                # Filter and highlight
-                filtered = [s for s in all_strings_data["strings"] if search_term in s.lower()]
-                
+                # Filter by search term and length
+                filtered = [s for s in length_filtered if search_term in s.lower()]
+
                 if filtered:
-                    for s in filtered:
+                    for s in filtered[:1000]:  # Limit for performance
                         # Highlight search term
                         lower_s = s.lower()
                         start_idx = 0
                         display_line = s + "\n"
                         strings_text.insert("end", display_line)
-                        
+
                         # Find and tag matches
                         while True:
                             pos = lower_s.find(search_term, start_idx)
                             if pos == -1:
                                 break
-                            
+
                             # Calculate text widget position
                             line_num = int(strings_text.index("end").split(".")[0]) - 1
                             tag_start = f"{line_num}.{pos}"
                             tag_end = f"{line_num}.{pos + len(search_term)}"
                             strings_text.tag_add("highlight", tag_start, tag_end)
                             start_idx = pos + len(search_term)
-                    
-                    status_label.configure(text=f"Found: {len(filtered)} matches")
+
+                    filter_msg = ""
+                    if min_len > 0 or max_len < float('inf'):
+                        filter_msg = f" (length: {min_len}-{max_len if max_len != float('inf') else '∞'})"
+                    status_label.configure(text=f"Found: {len(filtered)} matches{filter_msg}")
                 else:
-                    strings_text.insert("1.0", f"No strings found matching '{search_term}'")
+                    strings_text.insert("1.0", f"No strings found matching '{search_term}' with current filters")
                     status_label.configure(text="No matches")
-            
+
             # Configure highlight tag
             strings_text.tag_config("highlight", background=self.colors["red"], foreground="white")
             strings_text.configure(state="disabled")
-        
+
         search_entry.bind("<KeyRelease>", search_strings)
+        min_length_entry.bind("<KeyRelease>", search_strings)
+        max_length_entry.bind("<KeyRelease>", search_strings)
         
         # Extract strings in background
         def extract():
             try:
                 status_label.configure(text="Extracting strings...")
-                strings = self.process_monitor.extract_strings_from_process(pid, min_length=10, limit=10000)
-                
+                refresh_btn.configure(state="disabled", text="🔄 Extracting...")
+
+                # Get minimum length for extraction (use lower value for more strings)
+                try:
+                    extract_min_length = int(min_length_entry.get()) if min_length_entry.get() else 4
+                    # Use a lower min_length for extraction to capture more strings
+                    extract_min_length = max(4, min(extract_min_length, 10))
+                except ValueError:
+                    extract_min_length = 4
+
+                # Extract with increased limit for live refresh
+                strings = self.process_monitor.extract_strings_from_process(
+                    pid,
+                    min_length=extract_min_length,
+                    limit=20000  # Increased limit for better live refresh
+                )
+
                 result_text = ""
-                
+
                 # Group strings by type
                 urls = [s for s in strings if ('http://' in s or 'https://' in s or 'www.' in s)]
                 ips = [s for s in strings if any(c.isdigit() and '.' in s for c in s)]
                 paths = [s for s in strings if ('\\' in s or '/' in s) and len(s) > 10]
                 others = [s for s in strings if s not in urls and s not in ips and s not in paths]
-                
+
                 if urls:
                     result_text += f"URLs/Domains ({len(urls)}):\n" + "="*80 + "\n"
                     result_text += "\n".join(urls[:50]) + "\n\n"
@@ -1695,22 +1800,39 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 if others:
                     result_text += f"Other Strings ({len(others)}):\n" + "="*80 + "\n"
                     result_text += "\n".join(others[:200]) + "\n"
-                
+
                 all_strings_data["strings"] = strings
                 all_strings_data["original_text"] = result_text
-                
+
+                # Update UI in main thread
                 self.root.after(0, lambda: strings_text.configure(state="normal"))
+                self.root.after(0, lambda: strings_text.delete("1.0", "end"))
                 self.root.after(0, lambda: strings_text.insert("1.0", result_text))
                 self.root.after(0, lambda: strings_text.configure(state="disabled"))
                 self.root.after(0, lambda: status_label.configure(
-                    text=f"Total: {len(strings)} strings extracted | Use search to filter"
+                    text=f"Total: {len(strings)} strings extracted | Use filters to refine"
                 ))
+                self.root.after(0, lambda: refresh_btn.configure(state="normal", text="🔄 Refresh Strings"))
+
+                # Auto-apply current filters after extraction
+                self.root.after(100, search_strings)
+
             except Exception as e:
                 self.root.after(0, lambda: strings_text.configure(state="normal"))
+                self.root.after(0, lambda: strings_text.delete("1.0", "end"))
                 self.root.after(0, lambda: strings_text.insert("1.0", f"Error: {str(e)}"))
                 self.root.after(0, lambda: strings_text.configure(state="disabled"))
                 self.root.after(0, lambda: status_label.configure(text="Error extracting strings"))
-        
+                self.root.after(0, lambda: refresh_btn.configure(state="normal", text="🔄 Refresh Strings"))
+
+        def refresh_strings():
+            """Refresh strings by re-extracting from process memory"""
+            threading.Thread(target=extract, daemon=True).start()
+
+        # Set refresh button command
+        refresh_btn.configure(command=refresh_strings)
+
+        # Initial extraction
         threading.Thread(target=extract, daemon=True).start()
 
         # ===== LIVE EVENTS TAB =====

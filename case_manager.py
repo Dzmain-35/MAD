@@ -630,21 +630,37 @@ Threat Score: {file_info['threat_score']} ({file_info['threat_level']})
     def get_file_info(self, filename: str) -> Optional[Dict]:
         """
         Get information for a specific file in current case
-        
+
         Args:
             filename: Name of the file
-            
+
         Returns:
             File info dictionary or None
         """
         if not self.current_case:
             return None
-        
+
         for file_info in self.current_case["files"]:
             if file_info["filename"] == filename:
                 return file_info
-        
+
         return None
+
+    def save_case_notes(self, case_dir: str, notes: str):
+        """
+        Save case notes to a text file
+
+        Args:
+            case_dir: Case directory path
+            notes: Notes text to save
+        """
+        notes_path = os.path.join(case_dir, "case_notes.txt")
+        try:
+            with open(notes_path, 'w', encoding='utf-8') as f:
+                f.write(notes)
+            print(f"Case notes saved to: {notes_path}")
+        except Exception as e:
+            print(f"Error saving case notes: {e}")
 
 
 # Example usage for testing

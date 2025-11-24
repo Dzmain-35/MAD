@@ -153,6 +153,7 @@ class MemoryStringExtractor:
                 'paths': set(),
                 'ips': set(),
                 'registry': set(),
+                'environment': set(),
             },
             'memory_regions': [],
             'total_bytes_scanned': 0,
@@ -271,8 +272,9 @@ class MemoryStringExtractor:
                 traceback.print_exc()
 
         # Convert sets to sorted lists and limit
+        # Use more generous per-category limits to match Process Hacker behavior
         for key in result['strings']:
-            result['strings'][key] = sorted(list(result['strings'][key]))[:max_strings // 5]
+            result['strings'][key] = sorted(list(result['strings'][key]))[:max_strings]
 
         # Validate results
         total_extracted = sum(len(s) for s in result['strings'].values())
@@ -481,6 +483,17 @@ class MemoryStringExtractor:
         # URLs
         if re.search(r'https?://', string, re.IGNORECASE) or re.search(r'www\.', string, re.IGNORECASE):
             string_dict['urls'].add(string)
+
+        # Environment variables (detect KEY=VALUE format with common env var names)
+        elif '=' in string and len(string.split('=', 1)) == 2:
+            key, value = string.split('=', 1)
+            # Common environment variable patterns
+            if (key.isupper() or key.startswith('_') or
+                any(env_name in key.upper() for env_name in
+                    ['PATH', 'HOME', 'USER', 'TEMP', 'COMPUTER', 'PROCESSOR',
+                     'SYSTEM', 'PROGRAM', 'APP', 'LOCAL', 'ROAMING', 'PUBLIC',
+                     'DRIVE', 'DIR', 'NAME', 'NUMBER', 'LOGON'])):
+                string_dict['environment'].add(string)
 
         # File paths
         elif '\\' in string or (string.count('/') > 1 and len(string) > 10):

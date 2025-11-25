@@ -57,6 +57,12 @@ class ForensicAnalysisGUI:
         self.process_monitor_active = False
         self.network_monitor_active = False
 
+        # Auto-refresh state
+        self.auto_refresh_enabled = True
+        self.auto_refresh_interval = 2000  # 2 seconds
+        self.auto_refresh_job = None
+        self.pid_to_tree_item = {}  # Track PIDs to tree item IDs for incremental updates
+
         # Procmon live monitors (PID -> monitor instance)
         self.procmon_monitors = {}
         
@@ -1255,6 +1261,8 @@ File Size: {file_info['file_size']} bytes"""
             # Update button text if it exists
             if hasattr(self, 'btn_toggle_process_monitor'):
                 self.btn_toggle_process_monitor.configure(text="⏸ Stop Monitoring")
+            # Start auto-refresh
+            self.start_auto_refresh()
 
         self.root.mainloop()
 
@@ -1265,35 +1273,69 @@ File Size: {file_info['file_size']} bytes"""
             self.process_monitor.start_monitoring()
             self.process_monitor_active = True
             self.btn_toggle_process_monitor.configure(text="⏸ Stop Monitoring")
-            messagebox.showinfo("Monitoring Active", 
+            # Start auto-refresh when monitoring starts
+            self.start_auto_refresh()
+            messagebox.showinfo("Monitoring Active",
                               "Process monitoring started. New processes will be automatically scanned with YARA.")
         else:
             self.process_monitor.stop_monitoring()
             self.process_monitor_active = False
             self.btn_toggle_process_monitor.configure(text="▶ Start Monitoring")
+            # Stop auto-refresh when monitoring stops
+            self.stop_auto_refresh()
+
+    def start_auto_refresh(self):
+        """Start automatic process tree refresh"""
+        if not self.auto_refresh_enabled:
+            return
+
+        # Cancel any existing job
+        if self.auto_refresh_job:
+            self.root.after_cancel(self.auto_refresh_job)
+
+        # Schedule next refresh
+        def auto_refresh_callback():
+            if self.process_monitor_active and self.auto_refresh_enabled:
+                self.refresh_process_list()
+                self.auto_refresh_job = self.root.after(self.auto_refresh_interval, auto_refresh_callback)
+
+        self.auto_refresh_job = self.root.after(self.auto_refresh_interval, auto_refresh_callback)
+
+    def stop_auto_refresh(self):
+        """Stop automatic process tree refresh"""
+        if self.auto_refresh_job:
+            self.root.after_cancel(self.auto_refresh_job)
+            self.auto_refresh_job = None
     
     def refresh_process_list(self):
-        """Refresh the process tree with parent-child hierarchy, preserving expanded state"""
-        # Save currently expanded items and their PIDs
+        """Refresh the process tree with parent-child hierarchy using incremental updates"""
+        # Get all current processes
+        processes = self.process_monitor.get_all_processes()
+
+        # Build process map by PID
+        process_map = {proc['pid']: proc for proc in processes}
+        current_pids = set(process_map.keys())
+        existing_pids = set(self.pid_to_tree_item.keys())
+
+        # Determine what changed
+        new_pids = current_pids - existing_pids
+        dead_pids = existing_pids - current_pids
+        potentially_updated_pids = current_pids & existing_pids
+
+        # Save expanded and selected state
         expanded_pids = set()
-        
-        def get_expanded_pids(item=""):
-            children = self.process_tree.get_children(item)
-            for child in children:
-                if self.process_tree.item(child, 'open'):
-                    # Get PID from values
-                    values = self.process_tree.item(child, 'values')
-                    if values and len(values) > 0:
-                        try:
-                            expanded_pids.add(int(values[0]))
-                        except:
-                            pass
-                get_expanded_pids(child)
-        
-        get_expanded_pids()
-        
-        # Save currently selected item PID
         selected_pid = None
+
+        for pid in existing_pids:
+            if pid in self.pid_to_tree_item:
+                item_id = self.pid_to_tree_item[pid]
+                try:
+                    if self.process_tree.exists(item_id):
+                        if self.process_tree.item(item_id, 'open'):
+                            expanded_pids.add(pid)
+                except:
+                    pass
+
         selection = self.process_tree.selection()
         if selection:
             try:
@@ -1302,82 +1344,135 @@ File Size: {file_info['file_size']} bytes"""
                     selected_pid = int(values[0])
             except:
                 pass
-        
-        # Clear existing
-        for item in self.process_tree.get_children():
-            self.process_tree.delete(item)
-        
-        # Get all processes
-        processes = self.process_monitor.get_all_processes()
-        
-        # Build process map by PID
-        process_map = {}
-        for proc in processes:
-            process_map[proc['pid']] = proc
-        
-        # Build parent-child relationships
-        children_map = {}
-        root_processes = []
-        
-        for proc in processes:
-            ppid = proc.get('ppid')
-            if ppid and ppid in process_map and ppid != proc['pid']:
-                if ppid not in children_map:
-                    children_map[ppid] = []
-                children_map[ppid].append(proc)
-            else:
-                root_processes.append(proc)
-        
-        # Store item IDs by PID for re-selection
-        pid_to_item = {}
-        
-        # Recursive function to add process and children
-        def add_process_tree(proc, parent_id=""):
-            pid = proc['pid']
-            name = proc['name']
-            exe = proc.get('exe', 'N/A')
-            
-            # FIXED: Determine YARA match status with rule name
-            yara_status = "No"
-            tags = ()
-            if proc.get('threat_detected'):
-                # Get the actual rule name
-                yara_rule = proc.get('yara_rule', 'Unknown')
-                if yara_rule and yara_rule != 'Unknown':
-                    yara_status = f"⚠️ {yara_rule}"  # Show rule name!
+
+        # Remove dead processes
+        for pid in dead_pids:
+            if pid in self.pid_to_tree_item:
+                try:
+                    self.process_tree.delete(self.pid_to_tree_item[pid])
+                except:
+                    pass
+                del self.pid_to_tree_item[pid]
+
+        # Update existing processes (check if YARA status changed)
+        for pid in potentially_updated_pids:
+            if pid not in self.pid_to_tree_item:
+                continue
+
+            proc = process_map[pid]
+            item_id = self.pid_to_tree_item[pid]
+
+            try:
+                if not self.process_tree.exists(item_id):
+                    # Item was deleted, need to re-add
+                    new_pids.add(pid)
+                    del self.pid_to_tree_item[pid]
+                    continue
+
+                # Check if YARA status changed
+                current_values = self.process_tree.item(item_id, 'values')
+
+                # Determine new YARA status
+                yara_status = "No"
+                tags = ()
+                if proc.get('threat_detected'):
+                    yara_rule = proc.get('yara_rule', 'Unknown')
+                    if yara_rule and yara_rule != 'Unknown':
+                        yara_status = f"⚠️ {yara_rule}"
+                    else:
+                        matches = proc.get('yara_matches', 0)
+                        yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
+                    tags = ('threat',)
+                elif proc['name'].lower() in ['system', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe']:
+                    tags = ('system',)
+
+                # Update if YARA status changed
+                if len(current_values) > 3 and current_values[3] != yara_status:
+                    self.process_tree.item(item_id, values=(pid, proc['name'], proc.get('exe', 'N/A'), yara_status), tags=tags)
+            except Exception as e:
+                # If error, mark for re-adding
+                if pid in self.pid_to_tree_item:
+                    del self.pid_to_tree_item[pid]
+                new_pids.add(pid)
+
+        # Add new processes - use full rebuild for new processes to maintain hierarchy
+        if new_pids:
+            # Build parent-child relationships for all processes
+            children_map = {}
+            root_processes = []
+
+            for proc in processes:
+                ppid = proc.get('ppid')
+                if ppid and ppid in process_map and ppid != proc['pid']:
+                    if ppid not in children_map:
+                        children_map[ppid] = []
+                    children_map[ppid].append(proc)
                 else:
-                    matches = proc.get('yara_matches', 0)
-                    yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
-                tags = ('threat',)
-            elif name.lower() in ['system', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe']:
-                tags = ('system',)
-            
-            # Insert into tree
-            item_id = self.process_tree.insert(
-                parent_id, 
-                "end",
-                text=f"  {name}",  # Tree column shows name with indent
-                values=(pid, name, exe, yara_status),
-                tags=tags,
-                open=pid in expanded_pids  # Restore expanded state
-            )
-            
-            # Store for re-selection
-            pid_to_item[pid] = item_id
-            
-            # Add children recursively
-            if pid in children_map:
-                for child in children_map[pid]:
-                    add_process_tree(child, item_id)
-        
-        # Add root processes and their trees
-        for proc in sorted(root_processes, key=lambda p: p['pid']):
-            add_process_tree(proc)
-        
+                    root_processes.append(proc)
+
+            # Recursive function to add process and children
+            def add_process_tree(proc, parent_id=""):
+                pid = proc['pid']
+
+                # Skip if already in tree
+                if pid in self.pid_to_tree_item:
+                    try:
+                        if self.process_tree.exists(self.pid_to_tree_item[pid]):
+                            # Already exists, just recurse to children
+                            if pid in children_map:
+                                for child in children_map[pid]:
+                                    add_process_tree(child, self.pid_to_tree_item[pid])
+                            return
+                    except:
+                        pass
+
+                name = proc['name']
+                exe = proc.get('exe', 'N/A')
+
+                # Determine YARA match status
+                yara_status = "No"
+                tags = ()
+                if proc.get('threat_detected'):
+                    yara_rule = proc.get('yara_rule', 'Unknown')
+                    if yara_rule and yara_rule != 'Unknown':
+                        yara_status = f"⚠️ {yara_rule}"
+                    else:
+                        matches = proc.get('yara_matches', 0)
+                        yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
+                    tags = ('threat',)
+                elif name.lower() in ['system', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe']:
+                    tags = ('system',)
+
+                # Insert into tree
+                item_id = self.process_tree.insert(
+                    parent_id,
+                    "end",
+                    text=f"  {name}",
+                    values=(pid, name, exe, yara_status),
+                    tags=tags,
+                    open=pid in expanded_pids
+                )
+
+                # Store mapping
+                self.pid_to_tree_item[pid] = item_id
+
+                # Add children recursively
+                if pid in children_map:
+                    for child in children_map[pid]:
+                        add_process_tree(child, item_id)
+
+            # Add new root processes and their trees
+            for proc in root_processes:
+                if proc['pid'] in new_pids or proc['pid'] not in self.pid_to_tree_item:
+                    add_process_tree(proc)
+
         # Restore selection
-        if selected_pid and selected_pid in pid_to_item:
-            self.process_tree.selection_set(pid_to_item[selected_pid])
-            self.process_tree.see(pid_to_item[selected_pid])
+        if selected_pid and selected_pid in self.pid_to_tree_item:
+            try:
+                self.process_tree.selection_set(self.pid_to_tree_item[selected_pid])
+                self.process_tree.see(self.pid_to_tree_item[selected_pid])
+            except:
+                pass
     
     def show_process_context_menu(self, event):
         """Show right-click context menu for processes"""
@@ -1636,7 +1731,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         )
         status_label.pack(side="left", padx=20)
 
-        # Second row: Length filter and refresh button
+        # Second row: Length filter, quality filter toggle, and refresh button
         filter_row = ctk.CTkFrame(search_frame, fg_color="transparent")
         filter_row.pack(fill="x", padx=5, pady=(5, 5))
 
@@ -1680,6 +1775,18 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             font=ctk.CTkFont(size=11)
         )
         max_length_entry.pack(side="left", padx=2)
+
+        # Quality filter toggle
+        quality_filter_var = ctk.BooleanVar(value=True)
+        quality_filter_checkbox = ctk.CTkCheckBox(
+            filter_row,
+            text="Quality Filter",
+            variable=quality_filter_var,
+            font=ctk.CTkFont(size=11),
+            checkbox_width=20,
+            checkbox_height=20
+        )
+        quality_filter_checkbox.pack(side="left", padx=15)
 
         # Refresh button
         refresh_btn = ctk.CTkButton(
@@ -1793,6 +1900,13 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         search_entry.bind("<KeyRelease>", search_strings)
         min_length_entry.bind("<KeyRelease>", search_strings)
         max_length_entry.bind("<KeyRelease>", search_strings)
+
+        # Re-extract when quality filter changes
+        def on_quality_filter_change():
+            """Re-extract strings when quality filter setting changes"""
+            threading.Thread(target=extract, daemon=True).start()
+
+        quality_filter_checkbox.configure(command=on_quality_filter_change)
         
         # Extract strings in background
         def extract():
@@ -1808,11 +1922,15 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 except ValueError:
                     extract_min_length = 4
 
+                # Get quality filter setting
+                use_quality_filter = quality_filter_var.get()
+
                 # Extract with increased limit for live refresh
                 strings = self.process_monitor.extract_strings_from_process(
                     pid,
                     min_length=extract_min_length,
-                    limit=20000  # Increased limit for better live refresh
+                    limit=20000,  # Increased limit for better live refresh
+                    enable_quality_filter=use_quality_filter
                 )
 
                 result_text = ""
@@ -1840,12 +1958,13 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 all_strings_data["original_text"] = result_text
 
                 # Update UI in main thread
+                filter_status = "Quality Filtered" if use_quality_filter else "All Strings (Unfiltered)"
                 self.root.after(0, lambda: strings_text.configure(state="normal"))
                 self.root.after(0, lambda: strings_text.delete("1.0", "end"))
                 self.root.after(0, lambda: strings_text.insert("1.0", result_text))
                 self.root.after(0, lambda: strings_text.configure(state="disabled"))
                 self.root.after(0, lambda: status_label.configure(
-                    text=f"Total: {len(strings)} strings extracted | Use filters to refine"
+                    text=f"Total: {len(strings)} strings extracted ({filter_status}) | Use filters to refine"
                 ))
                 self.root.after(0, lambda: refresh_btn.configure(state="normal", text="🔄 Refresh Strings"))
 

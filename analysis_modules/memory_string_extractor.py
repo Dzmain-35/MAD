@@ -12,6 +12,7 @@ import platform
 import re
 import psutil
 import math
+import time
 from typing import List, Dict, Set, Optional
 from collections import defaultdict, Counter
 
@@ -100,17 +101,21 @@ class MemoryStringExtractor:
     Similar to Process Hacker's memory search functionality
     """
 
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, cache_ttl: int = 30):
         """
         Initialize the memory string extractor
 
         Args:
             verbose: Enable verbose logging
+            cache_ttl: Cache time-to-live in seconds (default: 30)
         """
         if not IS_WINDOWS:
             raise RuntimeError("MemoryStringExtractor requires Windows platform")
 
         self.verbose = verbose
+        self.cache_ttl = cache_ttl
+        self.cache = {}  # PID -> (timestamp, results)
+
         self.string_patterns = {
             'ascii': re.compile(rb'[\x20-\x7E]{4,}'),
             'unicode': re.compile(rb'(?:[\x20-\x7E]\x00){4,}'),
@@ -126,7 +131,8 @@ class MemoryStringExtractor:
         max_strings: int = 20000,
         include_unicode: bool = True,
         filter_regions: Optional[List[str]] = None,
-        enable_quality_filter: bool = True
+        enable_quality_filter: bool = True,
+        use_cache: bool = True
     ) -> Dict[str, any]:
         """
         Extract strings from process memory regions
@@ -140,10 +146,35 @@ class MemoryStringExtractor:
                           If None, scans all readable regions
             enable_quality_filter: Enable quality filtering to remove low-quality strings
                                  (entropy, vowel ratio, repetition, truncation checks)
+            use_cache: Use cached results if available and within TTL
 
         Returns:
             Dictionary containing extracted strings and metadata
         """
+        # Create cache key based on parameters
+        cache_key = (pid, min_length, max_strings, include_unicode,
+                     tuple(filter_regions) if filter_regions else None,
+                     enable_quality_filter)
+
+        # Check cache if enabled
+        if use_cache and cache_key in self.cache:
+            timestamp, cached_result = self.cache[cache_key]
+            age = time.time() - timestamp
+
+            if age < self.cache_ttl:
+                if self.verbose:
+                    print(f"[MemoryExtractor] Using cached results for PID {pid} (age: {age:.1f}s)")
+                # Return a copy to prevent modifications
+                return {
+                    'pid': cached_result['pid'],
+                    'strings': {k: list(v) if isinstance(v, list) else v for k, v in cached_result['strings'].items()},
+                    'memory_regions': cached_result['memory_regions'][:],
+                    'total_bytes_scanned': cached_result['total_bytes_scanned'],
+                    'errors': cached_result['errors'][:],
+                    'cached': True,
+                    'cache_age': age
+                }
+
         result = {
             'pid': pid,
             'strings': {
@@ -157,9 +188,10 @@ class MemoryStringExtractor:
             },
             'memory_regions': [],
             'total_bytes_scanned': 0,
-            'errors': []
+            'errors': [],
+            'cached': False
         }
-        
+
         if filter_regions is None:
             filter_regions = ['private', 'image', 'mapped']
         
@@ -290,6 +322,19 @@ class MemoryStringExtractor:
             result['errors'].append(warning_msg)
             if self.verbose or True:  # Always show this warning
                 print(f"[MemoryExtractor] {warning_msg}")
+
+        # Store in cache if successful extraction
+        if use_cache and total_extracted > 0:
+            self.cache[cache_key] = (time.time(), result)
+            if self.verbose:
+                print(f"[MemoryExtractor] Cached results for PID {pid} ({total_extracted} strings)")
+
+            # Clean old cache entries (older than 2x TTL)
+            current_time = time.time()
+            expired_keys = [k for k, (ts, _) in self.cache.items()
+                          if current_time - ts > self.cache_ttl * 2]
+            for k in expired_keys:
+                del self.cache[k]
 
         return result
     

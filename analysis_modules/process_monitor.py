@@ -504,27 +504,28 @@ class ProcessMonitor:
         except Exception as e:
             return {"error": str(e)}
     
-    def extract_strings_from_process(self, pid: int, min_length: int = 4, limit: int = 1000) -> List[str]:
+    def extract_strings_from_process(self, pid: int, min_length: int = 4, limit: int = 1000, enable_quality_filter: bool = False) -> List[str]:
         """
         Extract printable strings from process memory (ENHANCED VERSION)
-        
+
         This now uses direct memory reading similar to Process Hacker when available.
         Falls back to file-based extraction if memory extraction is not available.
-        
+
         Args:
             pid: Process ID
             min_length: Minimum string length
             limit: Maximum number of strings to return
-            
+            enable_quality_filter: Enable quality filtering to remove low-quality strings
+
         Returns:
             List of extracted strings
         """
         if MEMORY_EXTRACTION_AVAILABLE and self.memory_extractor:
-            return self._extract_strings_from_memory(pid, min_length, limit)
+            return self._extract_strings_from_memory(pid, min_length, limit, enable_quality_filter=enable_quality_filter)
         else:
             return self._extract_strings_from_file(pid, min_length, limit)
     
-    def _extract_strings_from_memory(self, pid: int, min_length: int, limit: int, yara_matched_strings: Optional[List[str]] = None) -> List[str]:
+    def _extract_strings_from_memory(self, pid: int, min_length: int, limit: int, yara_matched_strings: Optional[List[str]] = None, enable_quality_filter: bool = False) -> List[str]:
         """
         Enhanced memory-based string extraction using Windows API
 
@@ -533,6 +534,7 @@ class ProcessMonitor:
             min_length: Minimum string length
             limit: Maximum number of strings
             yara_matched_strings: YARA-matched strings to always include (bypasses filters)
+            enable_quality_filter: Enable quality filtering to remove low-quality strings
         """
         try:
             # Extract strings from process memory with relaxed min_length to catch more
@@ -545,7 +547,7 @@ class ProcessMonitor:
                 max_strings=limit,
                 include_unicode=True,
                 filter_regions=['private', 'image', 'mapped'],  # Scan all region types
-                enable_quality_filter=False  # Disable quality filter to catch all strings
+                enable_quality_filter=enable_quality_filter  # Use parameter value
             )
 
             # Combine all string types into a single list

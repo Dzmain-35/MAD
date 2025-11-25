@@ -1248,6 +1248,14 @@ File Size: {file_info['file_size']} bytes"""
     # ==================== APPLICATION LIFECYCLE ====================
     def run(self):
         """Start the application"""
+        # Auto-start process monitoring
+        if not self.process_monitor_active:
+            self.process_monitor.start_monitoring()
+            self.process_monitor_active = True
+            # Update button text if it exists
+            if hasattr(self, 'btn_toggle_process_monitor'):
+                self.btn_toggle_process_monitor.configure(text="⏸ Stop Monitoring")
+
         self.root.mainloop()
 
     # ==================== PROCESS MONITOR METHODS ====================
@@ -1384,10 +1392,10 @@ File Size: {file_info['file_size']} bytes"""
         if not selection:
             messagebox.showwarning("No Selection", "Please select a process to scan")
             return
-        
+
         item = self.process_tree.item(selection[0])
         pid = int(item['values'][0])
-        
+
         # Scan in thread
         def scan():
             result = self.process_monitor.scan_process(pid)
@@ -1399,25 +1407,52 @@ File Size: {file_info['file_size']} bytes"""
                 threat_score = result.get('threat_score', 0)
                 risk_level = result.get('risk_level', 'Low')
                 strings = result.get('strings', [])
-                
+
+                # Update monitored_processes dictionary so YARA Matches column is updated
+                if pid not in self.process_monitor.monitored_processes:
+                    # Get process info first
+                    try:
+                        proc = __import__('psutil').Process(pid)
+                        self.process_monitor.monitored_processes[pid] = {
+                            'pid': pid,
+                            'name': proc.name(),
+                            'exe': proc.exe() if proc.exe() else "N/A",
+                            'scan_results': result,
+                            'threat_detected': matches_found,
+                            'yara_rule': rule if matches_found else None
+                        }
+                    except:
+                        # If process info fails, just store scan results
+                        self.process_monitor.monitored_processes[pid] = {
+                            'pid': pid,
+                            'scan_results': result,
+                            'threat_detected': matches_found,
+                            'yara_rule': rule if matches_found else None
+                        }
+                else:
+                    # Update existing entry
+                    self.process_monitor.monitored_processes[pid]['scan_results'] = result
+                    self.process_monitor.monitored_processes[pid]['threat_detected'] = matches_found
+                    self.process_monitor.monitored_processes[pid]['yara_rule'] = rule if matches_found else None
+
                 msg = f"PID {pid} Scan Complete\n\n"
                 msg += f"Matches Found: {'Yes' if matches_found else 'No'}\n\n"
-                
+
                 if matches_found and rule != 'No_YARA_Hit':
                     msg += f"Rule: {rule}\n"
                     msg += f"Threat Score: {threat_score}\n"
                     msg += f"Risk Level: {risk_level}\n\n"
-                    
+
                     if strings:
                         msg += f"Matched Strings ({len(strings)}):\n"
                         for s in strings[:5]:  # Show first 5
                             msg += f"  - {s[:50]}...\n" if len(s) > 50 else f"  - {s}\n"
                 else:
                     msg += "No threats detected."
-                
+
                 self.root.after(0, lambda: messagebox.showinfo("Scan Results", msg))
                 self.root.after(0, self.refresh_process_list)
-        
+
         threading.Thread(target=scan, daemon=True).start()
     
     # FIXED: Combined view_process_details and extract_strings into one method
@@ -2128,11 +2163,11 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         # Tab switching
         tabs = {"info": info_frame, "strings": strings_frame, "events": events_frame}
         buttons = {"info": btn_info, "strings": btn_strings, "events": btn_events}
-        
+
         def show_tab(tab_name):
             for name, frame in tabs.items():
                 frame.pack_forget()
-            
+
             for name, btn in buttons.items():
                 if name == tab_name:
                     btn.configure(
@@ -2145,9 +2180,13 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                         border_width=2,
                         border_color=self.colors["red"]
                     )
-            
+
             tabs[tab_name].pack(fill="both", expand=True)
-        
+
+            # Auto-start monitoring when events tab is opened
+            if tab_name == "events" and not event_monitor_state["monitoring"]:
+                toggle_monitoring()
+
         show_tab("info")
     
     def kill_selected_process(self):
@@ -2176,27 +2215,30 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         # Check if proc_info is valid
         if not proc_info:
             return
-        
+
+        # Always refresh process list when a new process is detected
+        self.root.after(0, self.refresh_process_list)
+
         if proc_info.get('threat_detected'):
             # Get scan results
             scan_results = proc_info.get('scan_results', {})
             if not scan_results:
                 return
-            
+
             rule = scan_results.get('rule', 'Unknown')
             threat_score = scan_results.get('threat_score', 0)
             risk_level = scan_results.get('risk_level', 'Unknown')
-            
+
             # Show alert in GUI thread
             def show_alert():
                 alert = ctk.CTkToplevel(self.root)
                 alert.title("⚠️ Threat Detected")
                 alert.geometry("500x300")
                 alert.attributes('-topmost', True)
-                
+
                 frame = ctk.CTkFrame(alert, fg_color=self.colors["red_dark"])
                 frame.pack(fill="both", expand=True, padx=2, pady=2)
-                
+
                 title = ctk.CTkLabel(
                     frame,
                     text="⚠️ MALICIOUS PROCESS DETECTED",
@@ -2204,7 +2246,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                     text_color="white"
                 )
                 title.pack(pady=20)
-                
+
                 details = f"""PID: {proc_info['pid']}
 Name: {proc_info['name']}
 Path: {proc_info['exe']}
@@ -2212,7 +2254,7 @@ Path: {proc_info['exe']}
 YARA Rule: {rule}
 Threat Score: {threat_score}
 Risk Level: {risk_level}"""
-                
+
                 details_label = ctk.CTkLabel(
                     frame,
                     text=details,
@@ -2220,7 +2262,7 @@ Risk Level: {risk_level}"""
                     justify="left"
                 )
                 details_label.pack(pady=10, padx=20)
-                
+
                 btn_close = ctk.CTkButton(
                     frame,
                     text="Close",
@@ -2229,9 +2271,8 @@ Risk Level: {risk_level}"""
                     hover_color=self.colors["dark_blue"]
                 )
                 btn_close.pack(pady=20)
-            
+
             self.root.after(0, show_alert)
-            self.root.after(0, self.refresh_process_list)
     
     # FIXED: Added network callback stub
     def on_new_connection_detected(self, conn_info):

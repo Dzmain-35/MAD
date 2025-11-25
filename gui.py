@@ -6,6 +6,8 @@ from case_manager import CaseManager
 from PIL import Image
 import os
 import threading
+import subprocess
+import platform
 from analysis_modules.process_monitor import ProcessMonitor
 from analysis_modules.network_monitor import NetworkMonitor
 from analysis_modules.procmon_events import ProcmonLiveMonitor, ProcmonEvent
@@ -589,6 +591,10 @@ class ForensicAnalysisGUI:
         self.process_context_menu.add_command(
             label="📋 View Details & Strings",  # FIXED: Combined command
             command=self.view_process_details_and_strings
+        )
+        self.process_context_menu.add_command(
+            label="📂 Open Folder Location",
+            command=self.open_folder_location
         )
         self.process_context_menu.add_separator(background="#444444")
         self.process_context_menu.add_command(
@@ -1530,22 +1536,71 @@ File Size: {file_info['file_size']} bytes"""
                     self.process_monitor.monitored_processes[pid]['threat_detected'] = matches_found
                     self.process_monitor.monitored_processes[pid]['yara_rule'] = rule if matches_found else None
 
-                msg = f"PID {pid} Scan Complete\n\n"
-                msg += f"Matches Found: {'Yes' if matches_found else 'No'}\n\n"
-
+                # If threats detected, show red warning popup like live scan
                 if matches_found and rule != 'No_YARA_Hit':
-                    msg += f"Rule: {rule}\n"
-                    msg += f"Threat Score: {threat_score}\n"
-                    msg += f"Risk Level: {risk_level}\n\n"
+                    def show_threat_alert():
+                        # Get process info for the alert
+                        try:
+                            proc = __import__('psutil').Process(pid)
+                            proc_name = proc.name()
+                            proc_exe = proc.exe() if proc.exe() else "N/A"
+                        except:
+                            proc_name = "Unknown"
+                            proc_exe = "N/A"
 
-                    if strings:
-                        msg += f"Matched Strings ({len(strings)}):\n"
-                        for s in strings[:5]:  # Show first 5
-                            msg += f"  - {s[:50]}...\n" if len(s) > 50 else f"  - {s}\n"
+                        alert = ctk.CTkToplevel(self.root)
+                        alert.title("⚠️ Threat Detected")
+                        alert.geometry("500x350")
+                        alert.attributes('-topmost', True)
+
+                        frame = ctk.CTkFrame(alert, fg_color=self.colors["red_dark"])
+                        frame.pack(fill="both", expand=True, padx=2, pady=2)
+
+                        title = ctk.CTkLabel(
+                            frame,
+                            text="⚠️ MALICIOUS PROCESS DETECTED",
+                            font=ctk.CTkFont(size=18, weight="bold"),
+                            text_color="white"
+                        )
+                        title.pack(pady=20)
+
+                        details = f"""PID: {pid}
+Name: {proc_name}
+Path: {proc_exe}
+
+YARA Rule: {rule}
+Threat Score: {threat_score}
+Risk Level: {risk_level}"""
+
+                        if strings:
+                            details += f"\n\nMatched Strings ({len(strings)}):"
+                            for s in strings[:3]:  # Show first 3
+                                s_display = s[:40] + "..." if len(s) > 40 else s
+                                details += f"\n  • {s_display}"
+
+                        details_label = ctk.CTkLabel(
+                            frame,
+                            text=details,
+                            font=ctk.CTkFont(size=12),
+                            justify="left"
+                        )
+                        details_label.pack(pady=10, padx=20)
+
+                        btn_close = ctk.CTkButton(
+                            frame,
+                            text="Close",
+                            command=alert.destroy,
+                            fg_color=self.colors["navy"],
+                            hover_color=self.colors["dark_blue"]
+                        )
+                        btn_close.pack(pady=20)
+
+                    self.root.after(0, show_threat_alert)
                 else:
-                    msg += "No threats detected."
+                    # No threats, show simple info popup
+                    msg = f"PID {pid} Scan Complete\n\nNo threats detected."
+                    self.root.after(0, lambda: messagebox.showinfo("Scan Results", msg))
 
-                self.root.after(0, lambda: messagebox.showinfo("Scan Results", msg))
                 self.root.after(0, self.refresh_process_list)
 
         threading.Thread(target=scan, daemon=True).start()
@@ -2307,7 +2362,45 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 toggle_monitoring()
 
         show_tab("info")
-    
+
+    def open_folder_location(self):
+        """Open the folder containing the selected process's executable"""
+        selection = self.process_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a process to view")
+            return
+
+        item = self.process_tree.item(selection[0])
+        file_path = item['values'][2]  # File Path column
+
+        if not file_path or file_path == "N/A":
+            messagebox.showerror("Error", "Process does not have an accessible file path")
+            return
+
+        try:
+            # Get the directory containing the file
+            folder_path = os.path.dirname(file_path)
+
+            # Check if path exists
+            if not os.path.exists(folder_path):
+                messagebox.showerror("Error", f"Folder does not exist: {folder_path}")
+                return
+
+            # Open folder based on platform
+            system = platform.system()
+            if system == "Windows":
+                # On Windows, use explorer with /select to highlight the file
+                subprocess.run(['explorer', '/select,', file_path])
+            elif system == "Darwin":  # macOS
+                # On macOS, use open with -R to reveal in Finder
+                subprocess.run(['open', '-R', file_path])
+            else:  # Linux and other Unix-like systems
+                # On Linux, open the folder (xdg-open doesn't support file selection)
+                subprocess.run(['xdg-open', folder_path])
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open folder location: {str(e)}")
+
     def kill_selected_process(self):
         """Kill selected process"""
         selection = self.process_tree.selection()

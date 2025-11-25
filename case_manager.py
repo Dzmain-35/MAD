@@ -12,9 +12,12 @@ import hashlib
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import requests
 import yara
+import tempfile
+import re
+from urllib.parse import urlparse
 
 # Import from other modules (to be created)
 # from utils.file_handler import FileHandler
@@ -200,7 +203,12 @@ class CaseManager:
             "status": "ACTIVE",
             "files": [],
             "total_threats": 0,
-            "total_vt_hits": 0
+            "total_vt_hits": 0,
+            "iocs": {
+                "urls": [],
+                "ips": [],
+                "domains": []
+            }
         }
         
         # Process each file
@@ -530,10 +538,10 @@ class CaseManager:
     def get_threat_level(self, score: int) -> str:
         """
         Convert threat score to threat level
-        
+
         Args:
             score: Threat score (0-100)
-            
+
         Returns:
             Threat level string
         """
@@ -546,6 +554,206 @@ class CaseManager:
         elif score > 0:
             return "Low"
         return "Clean"
+
+    def download_file_from_url(self, url: str, timeout: int = 30) -> Tuple[bool, str, str]:
+        """
+        Download a file from a URL to a temporary location
+
+        Args:
+            url: URL to download from
+            timeout: Request timeout in seconds
+
+        Returns:
+            Tuple of (success, file_path, error_message)
+        """
+        try:
+            print(f"Downloading file from URL: {url}")
+
+            # Parse URL to get filename
+            parsed_url = urlparse(url)
+            filename = os.path.basename(parsed_url.path)
+
+            # If no filename in URL, generate one
+            if not filename or '.' not in filename:
+                filename = f"downloaded_file_{datetime.now().strftime('%Y%m%d%H%M%S')}.bin"
+
+            # Create temporary file
+            temp_dir = tempfile.gettempdir()
+            temp_path = os.path.join(temp_dir, filename)
+
+            # Download file with streaming
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+
+            response = requests.get(url, headers=headers, timeout=timeout, stream=True)
+            response.raise_for_status()
+
+            # Write to temporary file
+            with open(temp_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            file_size = os.path.getsize(temp_path)
+            print(f"Successfully downloaded {file_size} bytes to {temp_path}")
+
+            # Add URL to IOCs if we have a current case
+            if self.current_case:
+                self.add_ioc("urls", url)
+
+            return True, temp_path, ""
+
+        except requests.exceptions.Timeout:
+            error_msg = f"Timeout downloading from {url}"
+            print(f"ERROR: {error_msg}")
+            return False, "", error_msg
+
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Failed to download from {url}: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            return False, "", error_msg
+
+        except Exception as e:
+            error_msg = f"Unexpected error downloading from {url}: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            return False, "", error_msg
+
+    def create_case_from_urls(self, urls: List[str]) -> Tuple[Dict, List[str]]:
+        """
+        Create a new case by downloading files from URLs
+
+        Args:
+            urls: List of URLs to download
+
+        Returns:
+            Tuple of (case_data, list of error messages)
+        """
+        downloaded_files = []
+        errors = []
+
+        # Download all files first
+        for url in urls:
+            success, file_path, error = self.download_file_from_url(url)
+            if success:
+                downloaded_files.append(file_path)
+            else:
+                errors.append(f"{url}: {error}")
+
+        # Create case with downloaded files if any succeeded
+        if downloaded_files:
+            case_data = self.create_case(downloaded_files)
+
+            # Clean up temporary files
+            for file_path in downloaded_files:
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                except:
+                    pass
+
+            return case_data, errors
+        else:
+            raise ValueError("Failed to download any files from provided URLs")
+
+    def add_files_from_urls_to_case(self, urls: List[str]) -> Tuple[Dict, List[str]]:
+        """
+        Add files to existing case by downloading from URLs
+
+        Args:
+            urls: List of URLs to download
+
+        Returns:
+            Tuple of (updated case_data, list of error messages)
+        """
+        if not self.current_case:
+            raise ValueError("No active case. Create a case first.")
+
+        downloaded_files = []
+        errors = []
+
+        # Download all files first
+        for url in urls:
+            success, file_path, error = self.download_file_from_url(url)
+            if success:
+                downloaded_files.append(file_path)
+            else:
+                errors.append(f"{url}: {error}")
+
+        # Add files to case if any succeeded
+        if downloaded_files:
+            case_data = self.add_files_to_case(downloaded_files)
+
+            # Clean up temporary files
+            for file_path in downloaded_files:
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                except:
+                    pass
+
+            return case_data, errors
+        else:
+            return self.current_case, errors
+
+    def add_ioc(self, ioc_type: str, value: str):
+        """
+        Add an IOC (Indicator of Compromise) to the current case
+
+        Args:
+            ioc_type: Type of IOC ('urls', 'ips', 'domains')
+            value: IOC value
+        """
+        if not self.current_case:
+            return
+
+        if ioc_type not in self.current_case.get("iocs", {}):
+            if "iocs" not in self.current_case:
+                self.current_case["iocs"] = {"urls": [], "ips": [], "domains": []}
+
+        # Avoid duplicates
+        if value not in self.current_case["iocs"][ioc_type]:
+            self.current_case["iocs"][ioc_type].append(value)
+
+            # Save updated metadata
+            case_id = self.current_case["id"]
+            case_dir = os.path.join(self.case_storage_path, case_id)
+            self.save_case_metadata(case_dir, self.current_case)
+
+    def extract_iocs_from_text(self, text: str) -> Dict[str, List[str]]:
+        """
+        Extract IOCs (URLs, IPs, domains) from text
+
+        Args:
+            text: Text to extract IOCs from
+
+        Returns:
+            Dictionary with lists of URLs, IPs, and domains
+        """
+        iocs = {"urls": [], "ips": [], "domains": []}
+
+        # URL pattern
+        url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+        urls = re.findall(url_pattern, text)
+        iocs["urls"].extend(urls)
+
+        # IP pattern (IPv4)
+        ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
+        ips = re.findall(ip_pattern, text)
+        # Filter out invalid IPs
+        valid_ips = [ip for ip in ips if all(0 <= int(octet) <= 255 for octet in ip.split('.'))]
+        iocs["ips"].extend(valid_ips)
+
+        # Domain pattern (basic)
+        domain_pattern = r'\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b'
+        domains = re.findall(domain_pattern, text.lower())
+        iocs["domains"].extend(domains)
+
+        # Remove duplicates
+        for key in iocs:
+            iocs[key] = list(set(iocs[key]))
+
+        return iocs
     
     def format_file_details(self, file_info: Dict) -> str:
         """
@@ -596,7 +804,7 @@ Threat Score: {file_info['threat_score']} ({file_info['threat_level']})
     def save_case_metadata(self, case_dir: str, case_data: Dict):
         """
         Save case metadata to JSON file
-        
+
         Args:
             case_dir: Case directory path
             case_data: Case data dictionary
@@ -604,7 +812,19 @@ Threat Score: {file_info['threat_score']} ({file_info['threat_level']})
         metadata_path = os.path.join(case_dir, "case_metadata.json")
         with open(metadata_path, 'w') as f:
             json.dump(case_data, f, indent=4)
-    
+
+    def save_case_notes(self, case_dir: str, notes: str):
+        """
+        Save case notes to text file
+
+        Args:
+            case_dir: Case directory path
+            notes: Notes text content
+        """
+        notes_path = os.path.join(case_dir, "case_notes.txt")
+        with open(notes_path, 'w', encoding='utf-8') as f:
+            f.write(notes)
+
     def save_file_details(self, storage_dir: str, filename: str, file_info: Dict):
         """
         Save individual file details to JSON

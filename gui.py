@@ -276,7 +276,75 @@ class ForensicAnalysisGUI:
             border_width=2
         )
         self.report_url_entry.pack(padx=5, pady=(0, 20))
-        
+
+        # Upload method selection
+        upload_method_frame = ctk.CTkFrame(center_container, fg_color="transparent")
+        upload_method_frame.pack(pady=(10, 10))
+
+        method_label = ctk.CTkLabel(
+            upload_method_frame,
+            text="Select Upload Method:",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="white"
+        )
+        method_label.pack(pady=(0, 10))
+
+        # Radio button variable
+        self.upload_method = tk.StringVar(value="file")
+
+        radio_frame = ctk.CTkFrame(upload_method_frame, fg_color="transparent")
+        radio_frame.pack()
+
+        self.radio_file = ctk.CTkRadioButton(
+            radio_frame,
+            text="Upload Files",
+            variable=self.upload_method,
+            value="file",
+            command=self.on_upload_method_change,
+            font=ctk.CTkFont(size=13),
+            fg_color=self.colors["red"],
+            hover_color=self.colors["red_dark"]
+        )
+        self.radio_file.pack(side="left", padx=20)
+
+        self.radio_url = ctk.CTkRadioButton(
+            radio_frame,
+            text="Download from URLs",
+            variable=self.upload_method,
+            value="url",
+            command=self.on_upload_method_change,
+            font=ctk.CTkFont(size=13),
+            fg_color=self.colors["red"],
+            hover_color=self.colors["red_dark"]
+        )
+        self.radio_url.pack(side="left", padx=20)
+
+        # URL input area (initially hidden)
+        self.url_input_frame = ctk.CTkFrame(center_container, fg_color=self.colors["navy"], corner_radius=8)
+
+        url_input_label = ctk.CTkLabel(
+            self.url_input_frame,
+            text="Enter URLs (one per line):",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="white",
+            anchor="w"
+        )
+        url_input_label.pack(anchor="w", padx=15, pady=(15, 5))
+
+        self.url_input_textbox = tk.Text(
+            self.url_input_frame,
+            wrap="none",
+            bg="#1a1a1a",
+            fg="#ffffff",
+            font=("Segoe UI", 11),
+            relief="flat",
+            padx=10,
+            pady=10,
+            height=6,
+            width=48
+        )
+        self.url_input_textbox.pack(padx=15, pady=(0, 15))
+
         # Upload button
         btn_upload = ctk.CTkButton(
             center_container,
@@ -289,7 +357,8 @@ class ForensicAnalysisGUI:
             hover_color=self.colors["red_dark"],
             corner_radius=8
         )
-        btn_upload.pack(pady=(0, 10))
+        btn_upload.pack(pady=(10, 10))
+        self.btn_new_case_upload = btn_upload
         
         # Status label for feedback
         self.new_case_status = ctk.CTkLabel(
@@ -391,7 +460,69 @@ class ForensicAnalysisGUI:
         # Files list container
         self.files_list_frame = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="transparent")
         self.files_list_frame.pack(fill="x", pady=(0, 10))
-        
+
+        # IOCs section
+        iocs_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="transparent")
+        iocs_header.pack(fill="x", pady=(10, 5))
+
+        iocs_title = ctk.CTkLabel(iocs_header, text="Indicators of Compromise (IOCs)",
+                                  font=ctk.CTkFont(size=16, weight="bold"),
+                                  text_color="white")
+        iocs_title.pack(side="left", padx=15)
+
+        btn_add_ioc = ctk.CTkButton(iocs_header, text="➕ Add IOC",
+                                    command=self.handle_add_ioc,
+                                    height=30, width=100,
+                                    fg_color=self.colors["red"],
+                                    hover_color=self.colors["red_dark"],
+                                    font=ctk.CTkFont(size=11, weight="bold"))
+        btn_add_ioc.pack(side="right", padx=15)
+
+        # IOCs container
+        iocs_container = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20")
+        iocs_container.pack(fill="x", pady=(0, 10))
+
+        # IOCs content frame
+        self.iocs_content_frame = ctk.CTkFrame(iocs_container, fg_color="transparent")
+        self.iocs_content_frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+        # IOCs lists
+        self.iocs_urls_frame = ctk.CTkFrame(self.iocs_content_frame, fg_color="#1a1a1a", corner_radius=5)
+        self.iocs_urls_frame.pack(fill="x", pady=(0, 10))
+
+        urls_label = ctk.CTkLabel(self.iocs_urls_frame, text="URLs:",
+                                  font=ctk.CTkFont(size=12, weight="bold"),
+                                  text_color="white", anchor="w")
+        urls_label.pack(anchor="w", padx=10, pady=(10, 5))
+
+        self.iocs_urls_list = ctk.CTkTextbox(self.iocs_urls_frame, height=80,
+                                             fg_color="#0d1520", corner_radius=5)
+        self.iocs_urls_list.pack(fill="x", padx=10, pady=(0, 10))
+
+        self.iocs_ips_frame = ctk.CTkFrame(self.iocs_content_frame, fg_color="#1a1a1a", corner_radius=5)
+        self.iocs_ips_frame.pack(fill="x", pady=(0, 10))
+
+        ips_label = ctk.CTkLabel(self.iocs_ips_frame, text="IP Addresses:",
+                                 font=ctk.CTkFont(size=12, weight="bold"),
+                                 text_color="white", anchor="w")
+        ips_label.pack(anchor="w", padx=10, pady=(10, 5))
+
+        self.iocs_ips_list = ctk.CTkTextbox(self.iocs_ips_frame, height=80,
+                                            fg_color="#0d1520", corner_radius=5)
+        self.iocs_ips_list.pack(fill="x", padx=10, pady=(0, 10))
+
+        self.iocs_domains_frame = ctk.CTkFrame(self.iocs_content_frame, fg_color="#1a1a1a", corner_radius=5)
+        self.iocs_domains_frame.pack(fill="x", pady=(0, 10))
+
+        domains_label = ctk.CTkLabel(self.iocs_domains_frame, text="Domains:",
+                                     font=ctk.CTkFont(size=12, weight="bold"),
+                                     text_color="white", anchor="w")
+        domains_label.pack(anchor="w", padx=10, pady=(10, 5))
+
+        self.iocs_domains_list = ctk.CTkTextbox(self.iocs_domains_frame, height=80,
+                                                fg_color="#0d1520", corner_radius=5)
+        self.iocs_domains_list.pack(fill="x", padx=10, pady=(0, 10))
+
         # Notes section
         notes_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="transparent")
         notes_header.pack(fill="x", pady=(10, 5))
@@ -761,31 +892,61 @@ class ForensicAnalysisGUI:
             )
     
     # ==================== EVENT HANDLERS ====================
+    def on_upload_method_change(self):
+        """Handle upload method radio button change"""
+        method = self.upload_method.get()
+        if method == "url":
+            self.url_input_frame.pack(pady=(10, 0), before=self.btn_new_case_upload)
+            self.btn_new_case_upload.configure(text="Download and Start Case")
+        else:
+            self.url_input_frame.pack_forget()
+            self.btn_new_case_upload.configure(text="Upload File to Start Case")
+
     def handle_new_case_upload(self):
-        """Handle file upload for new case - delegates to case_manager"""
+        """Handle file upload or URL download for new case"""
         if self.scan_in_progress:
             messagebox.showwarning("Scan in Progress", "Please wait for current scan to complete")
             return
-        
+
         # Validate analyst name and report URL
         analyst_name = self.analyst_name_entry.get().strip()
         report_url = self.report_url_entry.get().strip()
-        
+
         if not analyst_name:
             messagebox.showwarning("Missing Information", "Please enter an Analyst Name")
             self.analyst_name_entry.focus()
             return
-        
+
         if not report_url:
             messagebox.showwarning("Missing Information", "Please enter a Report URL")
             self.report_url_entry.focus()
             return
-            
-        files = filedialog.askopenfilenames(title="Select files to analyze")
-        if not files:
-            return
-        
-        self.process_new_case_files(list(files), analyst_name, report_url)
+
+        # Check upload method
+        method = self.upload_method.get()
+
+        if method == "url":
+            # Get URLs from text box
+            url_text = self.url_input_textbox.get("1.0", "end-1c").strip()
+            if not url_text:
+                messagebox.showwarning("Missing URLs", "Please enter at least one URL")
+                self.url_input_textbox.focus()
+                return
+
+            # Parse URLs (one per line)
+            urls = [url.strip() for url in url_text.split('\n') if url.strip()]
+            if not urls:
+                messagebox.showwarning("Missing URLs", "Please enter at least one valid URL")
+                return
+
+            self.process_new_case_urls(urls, analyst_name, report_url)
+        else:
+            # File upload mode
+            files = filedialog.askopenfilenames(title="Select files to analyze")
+            if not files:
+                return
+
+            self.process_new_case_files(list(files), analyst_name, report_url)
     
     def process_new_case_files(self, files, analyst_name, report_url):
         """Process files for new case with progress bar"""
@@ -884,7 +1045,144 @@ class ForensicAnalysisGUI:
         
         finally:
             self.scan_in_progress = False
-    
+
+    def process_new_case_urls(self, urls, analyst_name, report_url):
+        """Process URLs for new case with progress bar"""
+        if self.scan_in_progress:
+            messagebox.showwarning("Scan in Progress", "Please wait for current scan to complete")
+            return
+
+        self.scan_in_progress = True
+        self.cancel_scan = False
+
+        # Create progress window
+        self.create_progress_window(len(urls))
+
+        # Run downloading and scanning in separate thread
+        scan_thread = threading.Thread(
+            target=self._scan_urls_thread,
+            args=(urls, analyst_name, report_url),
+            daemon=True
+        )
+        scan_thread.start()
+
+    def _scan_urls_thread(self, urls, analyst_name, report_url):
+        """Background thread for URL downloading and file scanning"""
+        try:
+            # Create case structure
+            case_id = f"CASE-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            case_dir = os.path.join(self.case_manager.case_storage_path, case_id)
+            files_dir = os.path.join(case_dir, "files")
+            os.makedirs(files_dir, exist_ok=True)
+
+            # Initialize case data
+            case_data = {
+                "id": case_id,
+                "created": datetime.now().isoformat(),
+                "status": "ACTIVE",
+                "analyst_name": analyst_name,
+                "report_url": report_url,
+                "files": [],
+                "total_threats": 0,
+                "total_vt_hits": 0,
+                "iocs": {
+                    "urls": [],
+                    "ips": [],
+                    "domains": []
+                }
+            }
+
+            # Set current case so downloads are tracked
+            self.case_manager.current_case = case_data
+
+            downloaded_files = []
+            failed_downloads = []
+
+            # Download and process each URL
+            for i, url in enumerate(urls):
+                if self.cancel_scan:
+                    self.root.after(0, self.close_progress_window)
+                    self.root.after(0, lambda: messagebox.showinfo("Cancelled", "Scan cancelled by user"))
+                    self.scan_in_progress = False
+                    return
+
+                # Update progress - downloading
+                self.root.after(0, self.update_progress, i + 1, len(urls), f"Downloading: {url[:50]}...")
+
+                # Download file
+                success, file_path, error = self.case_manager.download_file_from_url(url)
+
+                if success:
+                    downloaded_files.append(file_path)
+
+                    # Update progress - scanning
+                    filename = os.path.basename(file_path)
+                    self.root.after(0, self.update_progress, i + 1, len(urls), f"Scanning: {filename}")
+
+                    # Process file
+                    file_info = self.case_manager.process_file(file_path, files_dir, case_id)
+                    file_info["source_url"] = url  # Track source URL
+                    case_data["files"].append(file_info)
+
+                    # Update case statistics
+                    has_yara = len(file_info["yara_matches"]) > 0
+                    has_thq = file_info["thq_family"] and file_info["thq_family"] not in ["Unknown", "N/A"]
+                    has_vt = file_info["vt_hits"] > 0
+
+                    if has_yara or has_thq or has_vt:
+                        case_data["total_threats"] += 1
+                    case_data["total_vt_hits"] += file_info["vt_hits"]
+
+                    # Clean up temporary file
+                    try:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                    except:
+                        pass
+                else:
+                    failed_downloads.append(f"{url}: {error}")
+
+            # Save case metadata
+            self.case_manager.save_case_metadata(case_dir, case_data)
+            self.current_case = case_data
+            self.case_manager.current_case = case_data
+
+            # Close progress and show success
+            self.root.after(0, self.close_progress_window)
+
+            success_msg = f"New case created: {case_data['id']}\n"
+            success_msg += f"Analyst: {analyst_name}\n"
+            success_msg += f"URLs processed: {len(urls)}\n"
+            success_msg += f"Files downloaded: {len(downloaded_files)}\n"
+            success_msg += f"Threats detected: {case_data['total_threats']}"
+
+            if failed_downloads:
+                success_msg += f"\n\nFailed downloads ({len(failed_downloads)}):\n"
+                success_msg += "\n".join(failed_downloads[:5])
+                if len(failed_downloads) > 5:
+                    success_msg += f"\n... and {len(failed_downloads) - 5} more"
+
+            self.root.after(0, lambda: self.new_case_status.configure(
+                text=f"✓ Case created: {case_data['id']} | Files: {len(downloaded_files)} | Threats: {case_data['total_threats']}"
+            ))
+            self.root.after(0, lambda: messagebox.showinfo("Success", success_msg))
+
+            # Clear form and switch tabs
+            self.root.after(0, lambda: self.analyst_name_entry.delete(0, 'end'))
+            self.root.after(0, lambda: self.report_url_entry.delete(0, 'end'))
+            self.root.after(0, lambda: self.url_input_textbox.delete("1.0", "end"))
+            self.root.after(0, lambda: self.show_tab("current_case"))
+
+        except Exception as e:
+            self.root.after(0, self.close_progress_window)
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to create case: {str(e)}"))
+            self.root.after(0, lambda: self.new_case_status.configure(text="✗ Error creating case"))
+            import traceback
+            traceback.print_exc()
+
+        finally:
+            self.scan_in_progress = False
+
     def create_progress_window(self, total_files):
         """Create progress window"""
         self.progress_window = ctk.CTkToplevel(self.root)
@@ -1009,36 +1307,152 @@ class ForensicAnalysisGUI:
         finally:
             self.scan_in_progress = False
     
+    def handle_add_ioc(self):
+        """Show dialog to add IOC to current case"""
+        if not self.current_case:
+            messagebox.showwarning("No Case", "No active case to add IOC to")
+            return
+
+        # Create dialog window
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Add IOC")
+        dialog.geometry("500x300")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (500 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (300 // 2)
+        dialog.geometry(f"500x300+{x}+{y}")
+
+        # Content frame
+        content = ctk.CTkFrame(dialog, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Title
+        title_label = ctk.CTkLabel(content, text="Add Indicator of Compromise",
+                                   font=ctk.CTkFont(size=16, weight="bold"))
+        title_label.pack(pady=(0, 15))
+
+        # IOC Type selection
+        type_label = ctk.CTkLabel(content, text="IOC Type:",
+                                  font=ctk.CTkFont(size=12, weight="bold"),
+                                  anchor="w")
+        type_label.pack(anchor="w", pady=(0, 5))
+
+        ioc_type_var = tk.StringVar(value="urls")
+        type_frame = ctk.CTkFrame(content, fg_color="transparent")
+        type_frame.pack(anchor="w", pady=(0, 10))
+
+        ctk.CTkRadioButton(type_frame, text="URL", variable=ioc_type_var, value="urls",
+                          fg_color=self.colors["red"]).pack(side="left", padx=(0, 10))
+        ctk.CTkRadioButton(type_frame, text="IP Address", variable=ioc_type_var, value="ips",
+                          fg_color=self.colors["red"]).pack(side="left", padx=(0, 10))
+        ctk.CTkRadioButton(type_frame, text="Domain", variable=ioc_type_var, value="domains",
+                          fg_color=self.colors["red"]).pack(side="left")
+
+        # IOC Value input
+        value_label = ctk.CTkLabel(content, text="IOC Value:",
+                                   font=ctk.CTkFont(size=12, weight="bold"),
+                                   anchor="w")
+        value_label.pack(anchor="w", pady=(0, 5))
+
+        ioc_value_entry = ctk.CTkEntry(content, width=450, height=35)
+        ioc_value_entry.pack(pady=(0, 20))
+        ioc_value_entry.focus()
+
+        # Buttons
+        btn_frame = ctk.CTkFrame(content, fg_color="transparent")
+        btn_frame.pack(pady=(10, 0))
+
+        def add_ioc():
+            ioc_type = ioc_type_var.get()
+            ioc_value = ioc_value_entry.get().strip()
+
+            if not ioc_value:
+                messagebox.showwarning("Empty Value", "Please enter an IOC value")
+                return
+
+            # Add IOC to case
+            self.case_manager.add_ioc(ioc_type, ioc_value)
+
+            # Refresh IOC display
+            self.refresh_iocs_display()
+
+            messagebox.showinfo("Success", f"IOC added successfully!\n\nType: {ioc_type}\nValue: {ioc_value}")
+            dialog.destroy()
+
+        btn_add = ctk.CTkButton(btn_frame, text="Add IOC", command=add_ioc,
+                               width=120, height=35,
+                               fg_color=self.colors["red"],
+                               hover_color=self.colors["red_dark"])
+        btn_add.pack(side="left", padx=5)
+
+        btn_cancel = ctk.CTkButton(btn_frame, text="Cancel", command=dialog.destroy,
+                                   width=120, height=35,
+                                   fg_color="gray40",
+                                   hover_color="gray30")
+        btn_cancel.pack(side="left", padx=5)
+
+    def refresh_iocs_display(self):
+        """Refresh the IOCs display in the Current Case tab"""
+        if not self.current_case:
+            return
+
+        iocs = self.current_case.get("iocs", {"urls": [], "ips": [], "domains": []})
+
+        # Clear existing content
+        self.iocs_urls_list.delete("1.0", "end")
+        self.iocs_ips_list.delete("1.0", "end")
+        self.iocs_domains_list.delete("1.0", "end")
+
+        # Display IOCs
+        if iocs.get("urls"):
+            self.iocs_urls_list.insert("1.0", "\n".join(iocs["urls"]))
+        else:
+            self.iocs_urls_list.insert("1.0", "No URLs recorded")
+
+        if iocs.get("ips"):
+            self.iocs_ips_list.insert("1.0", "\n".join(iocs["ips"]))
+        else:
+            self.iocs_ips_list.insert("1.0", "No IP addresses recorded")
+
+        if iocs.get("domains"):
+            self.iocs_domains_list.insert("1.0", "\n".join(iocs["domains"]))
+        else:
+            self.iocs_domains_list.insert("1.0", "No domains recorded")
+
     def handle_save_notes(self):
         """Save notes to the current case"""
         if not self.current_case:
             messagebox.showwarning("No Case", "No active case to save notes to")
             return
-        
+
         notes = self.notes_textbox.get("1.0", "end-1c").strip()
-        
+
         if not notes:
             messagebox.showwarning("Empty Notes", "Please enter some notes before saving")
             return
-        
+
         try:
             # Add notes to case data
             self.current_case["notes"] = notes
-            
+
             # Get case directory
             case_dir = os.path.join(self.case_manager.case_storage_path, self.current_case["id"])
-            
+
             # Save updated case metadata
             self.case_manager.save_case_metadata(case_dir, self.current_case)
-            
+
             # Also save notes as a separate text file
             self.case_manager.save_case_notes(case_dir, notes)
-            
+
             # Get the notes file path for display
             notes_file = os.path.join(case_dir, "case_notes.txt")
-            
+
             messagebox.showinfo(
-                "Success", 
+                "Success",
                 f"Notes saved successfully!\n\n"
                 f"Location:\n{notes_file}\n\n"
                 f"Characters: {len(notes)}"
@@ -1096,7 +1510,10 @@ class ForensicAnalysisGUI:
         if "notes" in self.current_case:
             self.notes_textbox.delete("1.0", "end")
             self.notes_textbox.insert("1.0", self.current_case["notes"])
-    
+
+        # Refresh IOCs display
+        self.refresh_iocs_display()
+
     def create_file_card(self, file_info):
         """Create an expandable card for displaying file information"""
         yara_matches = file_info.get("yara_matches", [])

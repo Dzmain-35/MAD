@@ -1472,6 +1472,26 @@ File Size: {file_info['file_size']} bytes"""
                 if proc['pid'] in new_pids or proc['pid'] not in self.pid_to_tree_item:
                     add_process_tree(proc)
 
+            # Add any remaining new child processes that weren't added as part of root process trees
+            # This handles the case where a new child process appears under an existing parent
+            remaining_new_pids = [pid for pid in new_pids if pid not in self.pid_to_tree_item]
+            for pid in remaining_new_pids:
+                if pid in process_map:
+                    proc = process_map[pid]
+                    ppid = proc.get('ppid')
+
+                    # Find the parent in the tree
+                    parent_item_id = ""
+                    if ppid and ppid in self.pid_to_tree_item:
+                        try:
+                            if self.process_tree.exists(self.pid_to_tree_item[ppid]):
+                                parent_item_id = self.pid_to_tree_item[ppid]
+                        except:
+                            pass
+
+                    # Add the process under its parent (or as root if parent not found)
+                    add_process_tree(proc, parent_item_id)
+
         # Restore selection
         if selected_pid and selected_pid in self.pid_to_tree_item:
             try:

@@ -1212,6 +1212,43 @@ class ForensicAnalysisGUI:
 
             monitor_state["current_filter"] = event_filter
 
+            # Clear and refresh display with filtered events
+            events_tree.delete(*events_tree.get_children())
+
+            # Get ALL events from monitor and filter them for display
+            monitor = monitor_state["monitor"]
+            all_events = monitor.get_recent_events(count=5000)  # Get last 5000 events
+
+            for event in all_events:
+                # Apply current filter
+                if not event_filter.matches(event):
+                    continue
+
+                # Check if suspicious for highlighting
+                is_suspicious = event_filter.is_suspicious(event)
+                tags = ('suspicious',) if is_suspicious else ()
+
+                # Truncate long paths
+                path = event.get('path', '')
+                if len(str(path)) > 100:
+                    path = str(path)[:97] + "..."
+
+                # Insert event
+                events_tree.insert("", "end", values=(
+                    event.get('timestamp', ''),
+                    event.get('pid', 0),
+                    event.get('process_name', '')[:20],
+                    event.get('event_type', ''),
+                    event.get('operation', ''),
+                    path,
+                    event.get('result', '')
+                ), tags=tags)
+
+            # Auto-scroll to bottom
+            children = events_tree.get_children()
+            if children:
+                events_tree.see(children[-1])
+
         def set_event_type_filter(event_type):
             """Set event type filter"""
             # Update button colors
@@ -1229,7 +1266,44 @@ class ForensicAnalysisGUI:
                 else:
                     event_filter.set_event_types([event_type])
 
-            refresh_events()
+                monitor_state["current_filter"] = event_filter
+
+                # Clear and refresh display with filtered events
+                events_tree.delete(*events_tree.get_children())
+
+                # Get ALL events from monitor and filter them for display
+                monitor = monitor_state["monitor"]
+                all_events = monitor.get_recent_events(count=5000)
+
+                for event in all_events:
+                    # Apply current filter
+                    if not event_filter.matches(event):
+                        continue
+
+                    # Check if suspicious for highlighting
+                    is_suspicious = event_filter.is_suspicious(event)
+                    tags = ('suspicious',) if is_suspicious else ()
+
+                    # Truncate long paths
+                    path = event.get('path', '')
+                    if len(str(path)) > 100:
+                        path = str(path)[:97] + "..."
+
+                    # Insert event
+                    events_tree.insert("", "end", values=(
+                        event.get('timestamp', ''),
+                        event.get('pid', 0),
+                        event.get('process_name', '')[:20],
+                        event.get('event_type', ''),
+                        event.get('operation', ''),
+                        path,
+                        event.get('result', '')
+                    ), tags=tags)
+
+                # Auto-scroll to bottom
+                children = events_tree.get_children()
+                if children:
+                    events_tree.see(children[-1])
 
         def refresh_events():
             """Refresh the events display (incremental updates)"""
@@ -1244,8 +1318,11 @@ class ForensicAnalysisGUI:
 
                 # Add only new events to tree (incremental update for performance)
                 for event in new_events:
-                    # Events are already filtered by the monitor, so we don't need to filter again
-                    # Just check if suspicious for highlighting
+                    # Apply current filter to new events
+                    if monitor_state["current_filter"] and not monitor_state["current_filter"].matches(event):
+                        continue
+
+                    # Check if suspicious for highlighting
                     is_suspicious = False
                     if monitor_state["current_filter"]:
                         is_suspicious = monitor_state["current_filter"].is_suspicious(event)

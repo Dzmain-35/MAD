@@ -1028,6 +1028,30 @@ class ForensicAnalysisGUI:
         )
         apply_filter_btn.pack(side="left", padx=10)
 
+        clear_filter_btn = ctk.CTkButton(
+            filter_row2,
+            text="Clear Filters",
+            command=None,  # Will be set later
+            height=30,
+            width=100,
+            fg_color="transparent",
+            border_width=2,
+            border_color=self.colors["red"]
+        )
+        clear_filter_btn.pack(side="left", padx=5)
+
+        # ===== PROCESS INFO PANEL (Procmon-style, shown when PID filter active) =====
+        process_info_panel = ctk.CTkFrame(content, fg_color=self.colors["dark_blue"], height=80)
+        process_info_label = ctk.CTkLabel(
+            process_info_panel,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color="white",
+            anchor="w",
+            justify="left"
+        )
+        process_info_label.pack(fill="both", expand=True, padx=15, pady=10)
+
         # ===== EVENTS DISPLAY =====
         events_frame = ctk.CTkFrame(content, fg_color="gray20")
         events_frame.pack(fill="both", expand=True)
@@ -1249,6 +1273,113 @@ class ForensicAnalysisGUI:
             if children:
                 events_tree.see(children[-1])
 
+            # Update process info panel
+            update_process_info()
+
+        def clear_filters():
+            """Clear all filters and show full event list"""
+            if not monitor_state["monitor"]:
+                return
+
+            # Clear filter inputs
+            pid_filter_entry.delete(0, tk.END)
+            regex_filter_entry.delete(0, tk.END)
+            suspicious_var.set(False)
+
+            # Reset event type to "All"
+            for ftype, btn in event_type_buttons.items():
+                if ftype == "All":
+                    btn.configure(fg_color=self.colors["red"])
+                else:
+                    btn.configure(fg_color="transparent")
+
+            # Reset filter in monitor
+            event_filter = monitor_state["monitor"].get_filter()
+            event_filter.set_pid(None)
+            event_filter.set_path_regex(None)
+            event_filter.set_event_types(None)
+            event_filter.set_suspicious_only(False)
+            monitor_state["current_filter"] = event_filter
+
+            # Clear and refresh display with ALL events
+            events_tree.delete(*events_tree.get_children())
+
+            monitor = monitor_state["monitor"]
+            all_events = monitor.get_recent_events(count=5000)
+
+            for event in all_events:
+                # Check if suspicious for highlighting
+                is_suspicious = event_filter.is_suspicious(event)
+                tags = ('suspicious',) if is_suspicious else ()
+
+                # Truncate long paths
+                path = event.get('path', '')
+                if len(str(path)) > 100:
+                    path = str(path)[:97] + "..."
+
+                # Insert event
+                events_tree.insert("", "end", values=(
+                    event.get('timestamp', ''),
+                    event.get('pid', 0),
+                    event.get('process_name', '')[:20],
+                    event.get('event_type', ''),
+                    event.get('operation', ''),
+                    path,
+                    event.get('result', '')
+                ), tags=tags)
+
+            # Auto-scroll to bottom
+            children = events_tree.get_children()
+            if children:
+                events_tree.see(children[-1])
+
+            # Hide process info panel
+            process_info_panel.pack_forget()
+
+        def update_process_info():
+            """Update process info panel (Procmon-style) when PID filter is active"""
+            pid_text = pid_filter_entry.get().strip()
+
+            if pid_text and pid_text.isdigit():
+                try:
+                    pid = int(pid_text)
+                    # Get process info using psutil
+                    import psutil
+                    proc = psutil.Process(pid)
+
+                    # Build Procmon-style info string
+                    info_lines = []
+                    info_lines.append(f"Process:  {proc.name()}  (PID: {pid})")
+
+                    try:
+                        info_lines.append(f"Path:     {proc.exe()}")
+                    except:
+                        info_lines.append(f"Path:     [Access Denied]")
+
+                    try:
+                        cmdline = ' '.join(proc.cmdline())
+                        if cmdline:
+                            info_lines.append(f"Command:  {cmdline[:80]}{'...' if len(cmdline) > 80 else ''}")
+                    except:
+                        pass
+
+                    try:
+                        parent = proc.parent()
+                        if parent:
+                            info_lines.append(f"Parent:   {parent.name()} (PID: {parent.pid})")
+                    except:
+                        pass
+
+                    process_info_label.configure(text="\n".join(info_lines))
+                    process_info_panel.pack(fill="x", pady=(0, 10), before=events_frame)
+
+                except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+                    process_info_label.configure(text=f"Process (PID: {pid}) - Not found or access denied")
+                    process_info_panel.pack(fill="x", pady=(0, 10), before=events_frame)
+            else:
+                # No PID filter active, hide panel
+                process_info_panel.pack_forget()
+
         def set_event_type_filter(event_type):
             """Set event type filter"""
             # Update button colors
@@ -1304,6 +1435,9 @@ class ForensicAnalysisGUI:
                 children = events_tree.get_children()
                 if children:
                     events_tree.see(children[-1])
+
+                # Update process info panel
+                update_process_info()
 
         def refresh_events():
             """Refresh the events display (incremental updates)"""
@@ -1464,6 +1598,7 @@ class ForensicAnalysisGUI:
         export_btn.configure(command=export_events_to_csv)
         clear_btn.configure(command=clear_events_display)
         apply_filter_btn.configure(command=apply_filters)
+        clear_filter_btn.configure(command=clear_filters)
         suspicious_check.configure(command=lambda: apply_filters() if monitor_state["monitoring"] else None)
 
         # Connect event type filter buttons

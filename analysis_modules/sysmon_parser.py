@@ -2,21 +2,42 @@
 Sysmon Event Log Parser
 Provides real-time monitoring of Sysmon events including Registry, File, Network, and Process activity
 
-Sysmon Event IDs:
-- 1: Process Create
-- 3: Network Connection
-- 7: Image Load (DLL)
-- 8: CreateRemoteThread
-- 10: Process Access
-- 11: File Create
-- 12: Registry Object Added or Deleted
-- 13: Registry Value Set
-- 14: Registry Object Renamed
-- 15: File Create Stream Hash
-- 17/18: Pipe Created/Connected
-- 22: DNS Query
+IMPORTANT: Sysmon provides high-level security events, not every I/O operation like full Procmon.
+For true Procmon-level detail (every ReadFile/WriteFile), you need kernel ETW with FileIO provider.
+
+Sysmon Event Types Supported (maps to Procmon-style operations):
+- 1:  ProcessCreate         - Process creation
+- 2:  SetFileTime           - File creation time changed
+- 3:  NetworkConnect        - TCP/UDP connection (covers TCP Connect, UDP Send/Receive conceptually)
+- 5:  ProcessTerminate      - Process termination
+- 6:  DriverLoad            - Driver loaded
+- 7:  LoadImage             - DLL/Image loaded
+- 8:  CreateRemoteThread    - Remote thread creation
+- 9:  RawAccessRead         - Direct disk access
+- 10: ProcessAccess         - Process accessed
+- 11: CreateFile            - File created (not every write, just creation)
+- 12: RegCreateKey          - Registry key created/deleted
+- 13: RegSetValue           - Registry value set
+- 14: RegRenameKey          - Registry key renamed
+- 15: FileCreateStreamHash  - Alternate data stream
+- 17: CreatePipe            - Named pipe created
+- 18: PipeConnect           - Pipe connected
+- 19-21: WMI events         - WMI filter/consumer/binding
+- 22: DNSQuery              - DNS query
+- 23: FileDelete            - File deleted (archived)
+- 24: ClipboardChange       - Clipboard change
+- 25: ProcessTamper         - Process tampering detected
+- 26: FileDeleteDetected    - File delete detected
+- 27-29: File blocking      - Executable blocking events
+
+NOT Available via Sysmon (requires full ETW FileIO provider):
+- Individual WriteFile/ReadFile operations (too verbose, billions per second)
+- Individual TCP Receive/Send packets (use NetworkConnect event ID 3 instead)
+- SetRenameInformationFile (use FileDelete + FileCreate pattern)
+- SetDispositionInformationFile (use FileDelete event ID 23)
 
 Requires Sysmon to be installed: https://docs.microsoft.com/en-us/sysinternals/downloads/sysmon
+Install: sysmon.exe -accepteula -i
 """
 
 import threading
@@ -48,13 +69,17 @@ else:
 class SysmonEvent:
     """Represents a parsed Sysmon event"""
 
-    # Event type mapping
+    # Event type mapping - Maps Sysmon Event IDs to categories
     EVENT_TYPE_MAP = {
         1: "Process",
+        2: "File",
         3: "Network",
+        5: "Process",
+        6: "ImageLoad",
         7: "ImageLoad",
-        8: "RemoteThread",
-        10: "ProcessAccess",
+        8: "Thread",
+        9: "File",
+        10: "Process",
         11: "File",
         12: "Registry",
         13: "Registry",
@@ -62,24 +87,48 @@ class SysmonEvent:
         15: "File",
         17: "Pipe",
         18: "Pipe",
-        22: "DNS"
+        19: "WMI",
+        20: "WMI",
+        21: "WMI",
+        22: "DNS",
+        23: "File",
+        24: "Clipboard",
+        25: "Process",
+        26: "File",
+        27: "File",
+        28: "File",
+        29: "File"
     }
 
-    # Operation mapping
+    # Operation mapping - Maps to Procmon-style operation names
     OPERATION_MAP = {
         1: "ProcessCreate",
+        2: "SetFileTime",           # File creation time changed
         3: "NetworkConnect",
-        7: "ImageLoad",
+        5: "ProcessTerminate",
+        6: "DriverLoad",
+        7: "LoadImage",             # DLL/Image load
         8: "CreateRemoteThread",
+        9: "RawAccessRead",         # Direct disk access
         10: "ProcessAccess",
-        11: "FileCreate",
-        12: "RegistryObjectAddedOrDeleted",
-        13: "RegistryValueSet",
-        14: "RegistryKeyRenamed",
-        15: "FileCreateStreamHash",
-        17: "PipeCreated",
-        18: "PipeConnected",
-        22: "DNSQuery"
+        11: "CreateFile",           # File created
+        12: "RegCreateKey",         # Registry key created/deleted
+        13: "RegSetValue",          # Registry value set
+        14: "RegRenameKey",         # Registry key renamed
+        15: "FileCreateStreamHash", # Alternate data stream
+        17: "CreatePipe",
+        18: "PipeConnect",
+        19: "WMIFilter",
+        20: "WMIConsumer",
+        21: "WMIBinding",
+        22: "DNSQuery",
+        23: "FileDelete",           # File deleted (archived)
+        24: "ClipboardChange",
+        25: "ProcessTamper",
+        26: "FileDeleteDetected",   # File delete detected
+        27: "FileBlockExecutable",
+        28: "FileBlockShredding",
+        29: "FileExecutableDetected"
     }
 
     def __init__(self, event_id: int, event_data: Dict[str, Any]):
@@ -332,45 +381,142 @@ class SysmonLogMonitor:
             event_data['TimeCreated'] = event.TimeGenerated
 
             # Parse the event strings (Sysmon puts data in StringInserts)
+            # Sysmon events are formatted as XML rendered to string, often as "Label: Value"
             if event.StringInserts:
-                # Different event types have different field orders
-                # This is a simplified parser - real implementation would need
-                # to handle each event type's specific format
                 strings = event.StringInserts
 
-                # Try to extract common fields
-                for i, value in enumerate(strings):
-                    if value and '=' in value:
+                # Method 1: Parse "Key: Value" or "Key=Value" format
+                for value in strings:
+                    if value and ':' in value:
+                        # Handle "Key: Value" format (Sysmon XML rendering)
+                        parts = value.split(':', 1)
+                        if len(parts) == 2:
+                            key, val = parts
+                            event_data[key.strip()] = val.strip()
+                    elif value and '=' in value:
                         # Handle "Key=Value" format
                         parts = value.split('=', 1)
                         if len(parts) == 2:
                             key, val = parts
                             event_data[key.strip()] = val.strip()
 
-                # Fallback field extraction based on event type
-                if event_id == 1 and len(strings) >= 5:  # Process Create
-                    event_data.setdefault('Image', strings[4])
+                # Method 2: Try known Sysmon field positions for critical data
+                # Sysmon Event 1 (ProcessCreate) structure:
+                # RuleName, UtcTime, ProcessGuid, ProcessId, Image, FileVersion, Description, Product,
+                # Company, OriginalFileName, CommandLine, CurrentDirectory, User, LogonGuid, LogonId,
+                # TerminalSessionId, IntegrityLevel, Hashes, ParentProcessGuid, ParentProcessId, ParentImage, ParentCommandLine
+
+                if event_id == 1 and len(strings) >= 21:  # Process Create
+                    if 'ProcessId' not in event_data and len(strings) > 3:
+                        try:
+                            event_data['ProcessId'] = int(strings[3])
+                        except:
+                            pass
+                    event_data.setdefault('Image', strings[4] if len(strings) > 4 else '')
                     event_data.setdefault('CommandLine', strings[10] if len(strings) > 10 else '')
                     event_data.setdefault('ParentImage', strings[20] if len(strings) > 20 else '')
-                elif event_id == 3 and len(strings) >= 5:  # Network
-                    event_data.setdefault('Image', strings[4])
+                    event_data.setdefault('ParentProcessId', strings[19] if len(strings) > 19 else '')
+
+                # Event 3 (NetworkConnect)
+                elif event_id == 3 and len(strings) >= 17:
+                    if 'ProcessId' not in event_data and len(strings) > 3:
+                        try:
+                            event_data['ProcessId'] = int(strings[3])
+                        except:
+                            pass
+                    event_data.setdefault('Image', strings[4] if len(strings) > 4 else '')
+                    event_data.setdefault('Protocol', strings[7] if len(strings) > 7 else '')
+                    event_data.setdefault('SourceIp', strings[11] if len(strings) > 11 else '')
+                    event_data.setdefault('SourcePort', strings[13] if len(strings) > 13 else '')
                     event_data.setdefault('DestinationIp', strings[14] if len(strings) > 14 else '')
                     event_data.setdefault('DestinationPort', strings[16] if len(strings) > 16 else '')
-                elif event_id in [12, 13, 14]:  # Registry
-                    event_data.setdefault('Image', strings[4] if len(strings) > 4 else '')
-                    event_data.setdefault('TargetObject', strings[6] if len(strings) > 6 else '')
-                elif event_id == 11:  # File Create
-                    event_data.setdefault('Image', strings[4] if len(strings) > 4 else '')
-                    event_data.setdefault('TargetFilename', strings[6] if len(strings) > 6 else '')
 
-            # Extract PID from event (Windows event structure)
-            # Note: This gets the PID from the event structure, not from Sysmon data
-            event_data.setdefault('ProcessId', 0)
+                # Event 5 (ProcessTerminate)
+                elif event_id == 5 and len(strings) >= 4:
+                    if 'ProcessId' not in event_data and len(strings) > 3:
+                        try:
+                            event_data['ProcessId'] = int(strings[3])
+                        except:
+                            pass
+                    event_data.setdefault('Image', strings[4] if len(strings) > 4 else '')
+
+                # Event 7 (ImageLoad)
+                elif event_id == 7 and len(strings) >= 7:
+                    if 'ProcessId' not in event_data and len(strings) > 3:
+                        try:
+                            event_data['ProcessId'] = int(strings[3])
+                        except:
+                            pass
+                    event_data.setdefault('Image', strings[4] if len(strings) > 4 else '')
+                    event_data.setdefault('ImageLoaded', strings[5] if len(strings) > 5 else '')
+                    event_data.setdefault('Signed', strings[7] if len(strings) > 7 else '')
+
+                # Event 11 (FileCreate)
+                elif event_id == 11 and len(strings) >= 6:
+                    if 'ProcessId' not in event_data and len(strings) > 3:
+                        try:
+                            event_data['ProcessId'] = int(strings[3])
+                        except:
+                            pass
+                    event_data.setdefault('Image', strings[4] if len(strings) > 4 else '')
+                    event_data.setdefault('TargetFilename', strings[5] if len(strings) > 5 else '')
+
+                # Event 12, 13, 14 (Registry)
+                elif event_id in [12, 13, 14] and len(strings) >= 6:
+                    if 'ProcessId' not in event_data and len(strings) > 3:
+                        try:
+                            event_data['ProcessId'] = int(strings[3])
+                        except:
+                            pass
+                    event_data.setdefault('Image', strings[4] if len(strings) > 4 else '')
+                    event_data.setdefault('TargetObject', strings[5] if len(strings) > 5 else '')
+                    if event_id == 13 and len(strings) > 6:  # RegSetValue has Details
+                        event_data.setdefault('Details', strings[6])
+
+                # Event 22 (DNS Query)
+                elif event_id == 22 and len(strings) >= 6:
+                    if 'ProcessId' not in event_data and len(strings) > 3:
+                        try:
+                            event_data['ProcessId'] = int(strings[3])
+                        except:
+                            pass
+                    event_data.setdefault('Image', strings[4] if len(strings) > 4 else '')
+                    event_data.setdefault('QueryName', strings[5] if len(strings) > 5 else '')
+                    event_data.setdefault('QueryResults', strings[9] if len(strings) > 9 else '')
+
+                # Event 23 (FileDelete)
+                elif event_id == 23 and len(strings) >= 6:
+                    if 'ProcessId' not in event_data and len(strings) > 3:
+                        try:
+                            event_data['ProcessId'] = int(strings[3])
+                        except:
+                            pass
+                    event_data.setdefault('Image', strings[4] if len(strings) > 4 else '')
+                    event_data.setdefault('TargetFilename', strings[5] if len(strings) > 5 else '')
+
+            # Final fallback: try to get ProcessId from parsed data
+            if 'ProcessId' not in event_data or event_data['ProcessId'] == 0:
+                # Try alternative field names
+                if 'Process Id' in event_data:
+                    try:
+                        event_data['ProcessId'] = int(event_data['Process Id'])
+                    except:
+                        event_data['ProcessId'] = 0
+                else:
+                    event_data['ProcessId'] = 0
+
+            # Debug: print first few events to see structure
+            if self.stats['total_events'] < 5:
+                print(f"[SYSMON DEBUG] Event {event_id}: ProcessId={event_data.get('ProcessId')}, "
+                      f"Image={event_data.get('Image', '')[:30]}, "
+                      f"StringInserts count={len(strings) if strings else 0}")
 
             return SysmonEvent(event_id, event_data)
 
         except Exception as e:
-            print(f"Error parsing event: {e}")
+            print(f"Error parsing Sysmon event: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def _add_event(self, event: SysmonEvent):

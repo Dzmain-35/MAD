@@ -74,6 +74,7 @@ class ForensicAnalysisGUI:
         # System-wide activity monitor
         self.system_wide_monitor = None
         self.system_monitor_active = False
+        self.live_events_toggle_monitoring = None  # Will be set when tab is created
 
         # Create UI
         self.create_ui()
@@ -1397,6 +1398,9 @@ class ForensicAnalysisGUI:
         events_context_menu.entryconfig(1, command=copy_path_to_clipboard)
         events_context_menu.entryconfig(3, command=remove_event)
 
+        # Store toggle function for auto-start
+        self.live_events_toggle_monitoring = toggle_monitoring
+
         self.analysis_subtabs["live_events"] = frame
 
     # ==================== TAB NAVIGATION ====================
@@ -1486,6 +1490,10 @@ class ForensicAnalysisGUI:
                 fg_color=self.colors["red"],
                 border_width=0
             )
+            # Auto-start monitoring if not already active
+            if self.live_events_toggle_monitoring and not self.system_monitor_active:
+                print("[GUI] Auto-starting Live Events monitoring...")
+                self.live_events_toggle_monitoring()
     
     # ==================== EVENT HANDLERS ====================
     def on_upload_method_change(self):

@@ -264,16 +264,17 @@ class SystemWideMonitor:
             self.sysmon_monitor.register_callback(self._on_sysmon_event)
             self.sysmon_monitor.start_monitoring()
             print("System-wide monitor: Sysmon monitoring started")
-        else:
-            print("System-wide monitor: Using psutil fallback (no Sysmon)")
-            # Start psutil-based monitoring threads
-            self.monitor_threads = [
-                threading.Thread(target=self._monitor_processes, daemon=True),
-                threading.Thread(target=self._monitor_network, daemon=True),
-            ]
 
-            for thread in self.monitor_threads:
-                thread.start()
+        # ALWAYS start psutil fallback for process/network monitoring
+        # This ensures we have events even if Sysmon fails or is slow
+        print("System-wide monitor: Starting psutil process/network monitoring")
+        self.monitor_threads = [
+            threading.Thread(target=self._monitor_processes, daemon=True),
+            threading.Thread(target=self._monitor_network, daemon=True),
+        ]
+
+        for thread in self.monitor_threads:
+            thread.start()
 
         return True
 
@@ -301,6 +302,9 @@ class SystemWideMonitor:
         # Apply filter
         if self.event_filter.matches(event_dict):
             self._add_event(event_dict)
+        else:
+            # Debug: event was filtered out
+            pass
 
     def _add_event(self, event: Dict):
         """Add event to storage and notify callbacks"""
@@ -324,6 +328,10 @@ class SystemWideMonitor:
             self.stats['thread_events'] += 1
         elif 'imageload' in event_type:
             self.stats['imageload_events'] += 1
+
+        # Debug output for first 10 events
+        if self.stats['total_events'] <= 10:
+            print(f"[DEBUG] Event #{self.stats['total_events']}: {event_type} | {event.get('operation')} | PID:{event.get('pid')} | {event.get('path', '')[:50]}")
 
         # Notify callbacks
         for callback in self.event_callbacks:

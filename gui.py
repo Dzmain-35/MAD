@@ -111,7 +111,6 @@ class ForensicAnalysisGUI:
         self.create_new_case_tab()
         self.create_current_case_tab()
         self.create_analysis_tab()
-        self.create_live_activity_tab()
 
         # Show initial tab
         self.show_tab("new_case")
@@ -159,18 +158,6 @@ class ForensicAnalysisGUI:
             corner_radius=8
         )
         self.btn_analysis.pack(fill="x", pady=5)
-
-        self.btn_live_activity = ctk.CTkButton(
-            nav_frame, text="🌐 Live Activity",
-            command=lambda: self.show_tab("live_activity"),
-            height=45, font=ctk.CTkFont(size=14, weight="bold"),
-            fg_color="transparent",
-            hover_color=self.colors["navy"],
-            border_width=2,
-            border_color=self.colors["navy"],
-            corner_radius=8
-        )
-        self.btn_live_activity.pack(fill="x", pady=5)
         
     # ==================== NEW CASE TAB ====================
     def create_new_case_tab(self):
@@ -615,15 +602,28 @@ class ForensicAnalysisGUI:
             font=ctk.CTkFont(size=12, weight="bold")
         )
         self.btn_network.pack(side="left", padx=5)
-        
+
+        self.btn_live_events = ctk.CTkButton(
+            subtab_frame, text="📡 Live Events",
+            command=lambda: self.show_analysis_subtab("live_events"),
+            height=35, width=150,
+            fg_color="transparent",
+            hover_color=self.colors["navy"],
+            border_width=2,
+            border_color=self.colors["red"],
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        self.btn_live_events.pack(side="left", padx=5)
+
         # Content area for sub-tabs
         self.analysis_content = ctk.CTkFrame(frame, corner_radius=10, fg_color=self.colors["navy"])
         self.analysis_content.pack(fill="both", expand=True, padx=20, pady=10)
-        
+
         # Create sub-tab frames
         self.analysis_subtabs = {}
         self.create_processes_subtab()
         self.create_network_subtab()
+        self.create_live_events_subtab()
         
         self.tabs["analysis"] = frame
         self.show_analysis_subtab("processes")
@@ -833,31 +833,28 @@ class ForensicAnalysisGUI:
         
         self.analysis_subtabs["network"] = frame
 
-    # ==================== LIVE ACTIVITY MONITOR TAB ====================
-    def create_live_activity_tab(self):
-        """Create the Live Activity Monitor tab for system-wide monitoring"""
-        frame = ctk.CTkFrame(self.content_area, fg_color=self.colors["dark_blue"])
+    # ==================== LIVE EVENTS SUBTAB ====================
+    def create_live_events_subtab(self):
+        """Create the Live Events subtab for system-wide monitoring"""
+        frame = ctk.CTkFrame(self.analysis_content, fg_color="transparent")
 
-        # Header
-        header = ctk.CTkFrame(frame, height=80, fg_color=self.colors["navy"], corner_radius=0)
-        header.pack(fill="x", side="top")
-        header.pack_propagate(False)
+        # Header with title
+        header = ctk.CTkFrame(frame, fg_color="transparent")
+        header.pack(fill="x", padx=20, pady=10)
 
-        header_content = ctk.CTkFrame(header, fg_color="transparent")
-        header_content.pack(expand=True, padx=20)
+        title = ctk.CTkLabel(header, text="Live System Events",
+                            font=ctk.CTkFont(size=18, weight="bold"),
+                            text_color="white")
+        title.pack(side="left")
 
-        title = ctk.CTkLabel(header_content, text="🌐 Live Activity Monitor",
-                            font=ctk.CTkFont(size=24, weight="bold"))
-        title.pack(side="top", pady=(10, 5))
-
-        subtitle = ctk.CTkLabel(header_content,
-                               text="System-wide real-time monitoring of file, registry, network, and process activity",
-                               font=ctk.CTkFont(size=12), text_color="gray60")
-        subtitle.pack(side="top")
+        subtitle = ctk.CTkLabel(header,
+                               text="Real-time monitoring: File • Registry • Network • Process • DNS",
+                               font=ctk.CTkFont(size=11), text_color="gray60")
+        subtitle.pack(side="left", padx=20)
 
         # Main content area
         content = ctk.CTkFrame(frame, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=10, pady=10)
+        content.pack(fill="both", expand=True, padx=20, pady=(0, 10))
 
         # ===== CONTROL PANEL =====
         control_panel = ctk.CTkFrame(content, fg_color=self.colors["navy"], height=120)
@@ -1108,12 +1105,13 @@ class ForensicAnalysisGUI:
         events_tree.bind("<Button-3>", show_context_menu)
 
         # Store state for monitoring
+        from datetime import timedelta
         monitor_state = {
             "monitor": None,
             "monitoring": False,
             "current_filter": None,
             "update_job": None,
-            "last_update_time": datetime.now(),
+            "last_update_time": datetime.now() - timedelta(days=1),  # Start from yesterday to catch existing events
             "event_count": 0
         }
 
@@ -1245,18 +1243,17 @@ class ForensicAnalysisGUI:
 
                 # Add only new events to tree (incremental update for performance)
                 for event in new_events:
-                    # Check if event matches filter
-                    if monitor_state["current_filter"] and not monitor_state["current_filter"].matches(event):
-                        continue
+                    # Events are already filtered by the monitor, so we don't need to filter again
+                    # Just check if suspicious for highlighting
+                    is_suspicious = False
+                    if monitor_state["current_filter"]:
+                        is_suspicious = monitor_state["current_filter"].is_suspicious(event)
+                    tags = ('suspicious',) if is_suspicious else ()
 
                     # Truncate long paths
                     path = event.get('path', '')
                     if len(str(path)) > 100:
                         path = str(path)[:97] + "..."
-
-                    # Check if suspicious
-                    is_suspicious = monitor_state["current_filter"].is_suspicious(event) if monitor_state["current_filter"] else False
-                    tags = ('suspicious',) if is_suspicious else ()
 
                     # Insert event
                     events_tree.insert("", "end", values=(
@@ -1400,7 +1397,7 @@ class ForensicAnalysisGUI:
         events_context_menu.entryconfig(1, command=copy_path_to_clipboard)
         events_context_menu.entryconfig(3, command=remove_event)
 
-        self.tabs["live_activity"] = frame
+        self.analysis_subtabs["live_events"] = frame
 
     # ==================== TAB NAVIGATION ====================
     def show_tab(self, tab_name):
@@ -1421,11 +1418,6 @@ class ForensicAnalysisGUI:
             border_color=self.colors["navy"]
         )
         self.btn_analysis.configure(
-            fg_color="transparent",
-            border_width=2,
-            border_color=self.colors["navy"]
-        )
-        self.btn_live_activity.configure(
             fg_color="transparent",
             border_width=2,
             border_color=self.colors["navy"]
@@ -1451,11 +1443,6 @@ class ForensicAnalysisGUI:
                 fg_color=self.colors["navy"],
                 border_width=0
             )
-        elif tab_name == "live_activity":
-            self.btn_live_activity.configure(
-                fg_color=self.colors["navy"],
-                border_width=0
-            )
 
     def show_analysis_subtab(self, subtab_name):
         """Switch between analysis sub-tabs"""
@@ -1474,10 +1461,15 @@ class ForensicAnalysisGUI:
             border_width=2,
             border_color=self.colors["red"]
         )
-        
+        self.btn_live_events.configure(
+            fg_color="transparent",
+            border_width=2,
+            border_color=self.colors["red"]
+        )
+
         # Show selected subtab
         self.analysis_subtabs[subtab_name].pack(fill="both", expand=True)
-        
+
         # Highlight button
         if subtab_name == "processes":
             self.btn_processes.configure(
@@ -1486,6 +1478,11 @@ class ForensicAnalysisGUI:
             )
         elif subtab_name == "network":
             self.btn_network.configure(
+                fg_color=self.colors["red"],
+                border_width=0
+            )
+        elif subtab_name == "live_events":
+            self.btn_live_events.configure(
                 fg_color=self.colors["red"],
                 border_width=0
             )

@@ -661,7 +661,38 @@ class ForensicAnalysisGUI:
             hover_color=self.colors["dark_blue"]
         )
         btn_refresh.pack(side="right", padx=5)
-        
+
+        # Search bar
+        search_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        search_frame.pack(fill="x", padx=20, pady=(0, 10))
+
+        search_label = ctk.CTkLabel(search_frame, text="🔍 Search:",
+                                   font=ctk.CTkFont(size=12),
+                                   text_color="white")
+        search_label.pack(side="left", padx=(0, 10))
+
+        self.process_search_entry = ctk.CTkEntry(
+            search_frame,
+            placeholder_text="Enter PID or Process Name...",
+            height=35,
+            width=300,
+            fg_color="gray20",
+            border_color=self.colors["navy"],
+            border_width=2
+        )
+        self.process_search_entry.pack(side="left", padx=5)
+        self.process_search_entry.bind("<KeyRelease>", lambda e: self.filter_processes())
+
+        # Clear search button
+        btn_clear_search = ctk.CTkButton(
+            search_frame, text="✕ Clear",
+            command=self.clear_process_search,
+            height=35, width=80,
+            fg_color="gray30",
+            hover_color="gray40"
+        )
+        btn_clear_search.pack(side="left", padx=5)
+
         # Process tree area with parent-child hierarchy
         tree_frame = ctk.CTkFrame(frame, fg_color="gray20")
         tree_frame.pack(fill="both", expand=True, padx=20, pady=10)
@@ -817,21 +848,67 @@ class ForensicAnalysisGUI:
         
         vsb = tk.Scrollbar(tree_frame, orient="vertical")
         vsb.pack(side="right", fill="y")
-        
-        columns = ("Type", "Local", "Remote", "Status", "Process", "Suspicious")
-        self.network_tree = ttk.Treeview(tree_frame, columns=columns, 
+
+        columns = ("Type", "Local", "Remote", "Hostname", "Status", "Process", "Suspicious")
+        self.network_tree = ttk.Treeview(tree_frame, columns=columns,
                                         show="headings", yscrollcommand=vsb.set)
         self.network_tree.pack(side="left", fill="both", expand=True)
         vsb.config(command=self.network_tree.yview)
-        
-        # Configure columns
-        for col in columns:
-            self.network_tree.heading(col, text=col)
-            self.network_tree.column(col, width=100)
-        
+
+        # Configure columns with specific widths
+        self.network_tree.heading("Type", text="Type")
+        self.network_tree.column("Type", width=80, minwidth=60)
+        self.network_tree.heading("Local", text="Local")
+        self.network_tree.column("Local", width=150, minwidth=100)
+        self.network_tree.heading("Remote", text="Remote")
+        self.network_tree.column("Remote", width=150, minwidth=100)
+        self.network_tree.heading("Hostname", text="Hostname")
+        self.network_tree.column("Hostname", width=200, minwidth=120)
+        self.network_tree.heading("Status", text="Status")
+        self.network_tree.column("Status", width=100, minwidth=80)
+        self.network_tree.heading("Process", text="Process")
+        self.network_tree.column("Process", width=150, minwidth=100)
+        self.network_tree.heading("Suspicious", text="Suspicious")
+        self.network_tree.column("Suspicious", width=80, minwidth=60)
+
         # Configure tag colors
         self.network_tree.tag_configure('suspicious', background='#5c1c1c')
-        
+
+        # Right-click context menu for network tree
+        self.network_context_menu = tk.Menu(
+            self.network_tree,
+            tearoff=0,
+            bg="#1a1a1a",
+            fg="white",
+            activebackground="#dc2626",
+            activeforeground="white",
+            borderwidth=0,
+            relief="flat"
+        )
+        self.network_context_menu.add_command(
+            label="📋 Copy Local Address",
+            command=lambda: self.copy_network_cell(1)
+        )
+        self.network_context_menu.add_command(
+            label="📋 Copy Remote Address",
+            command=lambda: self.copy_network_cell(2)
+        )
+        self.network_context_menu.add_command(
+            label="📋 Copy Hostname",
+            command=lambda: self.copy_network_cell(3)
+        )
+        self.network_context_menu.add_command(
+            label="📋 Copy Process Name",
+            command=lambda: self.copy_network_cell(5)
+        )
+        self.network_context_menu.add_separator(background="#444444")
+        self.network_context_menu.add_command(
+            label="📋 Copy Entire Row",
+            command=self.copy_network_row
+        )
+
+        self.network_tree.bind("<Button-3>", self.show_network_context_menu)
+
         self.analysis_subtabs["network"] = frame
 
     # ==================== LIVE EVENTS SUBTAB ====================
@@ -1001,6 +1078,17 @@ class ForensicAnalysisGUI:
             height=30
         )
         pid_filter_entry.pack(side="left", padx=5)
+
+        # Include child processes checkbox
+        include_children_var = tk.BooleanVar(value=False)
+        include_children_checkbox = ctk.CTkCheckBox(
+            filter_row2,
+            text="Include children",
+            variable=include_children_var,
+            font=ctk.CTkFont(size=11),
+            width=120
+        )
+        include_children_checkbox.pack(side="left", padx=5)
 
         # Path regex filter
         regex_filter_label = ctk.CTkLabel(
@@ -1213,16 +1301,26 @@ class ForensicAnalysisGUI:
 
             event_filter = monitor_state["monitor"].get_filter()
 
-            # Apply PID filter
+            # Apply PID filter (with optional child processes)
             pid_text = pid_filter_entry.get().strip()
             if pid_text:
                 try:
                     pid = int(pid_text)
-                    event_filter.set_pid(pid)
+
+                    # Check if we should include child processes
+                    if include_children_var.get():
+                        # Get all child PIDs recursively
+                        pids_to_filter = self.get_child_pids_recursive(pid)
+                        pids_to_filter.add(pid)  # Include the parent PID too
+                        event_filter.set_pid_set(pids_to_filter)
+                    else:
+                        # Just filter by the single PID
+                        event_filter.set_pid(pid)
                 except:
                     event_filter.set_pid(None)
             else:
                 event_filter.set_pid(None)
+                event_filter.set_pid_set(None)
 
             # Apply regex filter
             regex_text = regex_filter_entry.get().strip()
@@ -1267,11 +1365,6 @@ class ForensicAnalysisGUI:
                     path,
                     event.get('result', '')
                 ), tags=tags)
-
-            # Auto-scroll to bottom
-            children = events_tree.get_children()
-            if children:
-                events_tree.see(children[-1])
 
             # Update process info panel
             update_process_info()
@@ -1327,11 +1420,6 @@ class ForensicAnalysisGUI:
                     path,
                     event.get('result', '')
                 ), tags=tags)
-
-            # Auto-scroll to bottom
-            children = events_tree.get_children()
-            if children:
-                events_tree.see(children[-1])
 
             # Hide process info panel
             process_info_panel.pack_forget()
@@ -1431,11 +1519,6 @@ class ForensicAnalysisGUI:
                         event.get('result', '')
                     ), tags=tags)
 
-                # Auto-scroll to bottom
-                children = events_tree.get_children()
-                if children:
-                    events_tree.see(children[-1])
-
                 # Update process info panel
                 update_process_info()
 
@@ -1485,10 +1568,6 @@ class ForensicAnalysisGUI:
                 if len(children) > 5000:
                     for item in children[:len(children) - 5000]:
                         events_tree.delete(item)
-
-                # Auto-scroll to bottom
-                if children:
-                    events_tree.see(children[-1])
 
                 # Update statistics
                 stats = monitor.get_stats()
@@ -2732,7 +2811,145 @@ File Size: {file_info['file_size']} bytes"""
                 self.process_tree.see(self.pid_to_tree_item[selected_pid])
             except:
                 pass
-    
+
+    def filter_processes(self):
+        """Filter processes by PID or Name, showing matching processes and all their children"""
+        search_text = self.process_search_entry.get().strip().lower()
+
+        if not search_text:
+            # If search is empty, refresh to show all
+            self.refresh_process_list()
+            return
+
+        # Get all processes
+        processes = self.process_monitor.get_all_processes()
+        process_map = {proc['pid']: proc for proc in processes}
+
+        # Build parent-child relationships
+        children_map = {}
+        for proc in processes:
+            ppid = proc.get('ppid')
+            if ppid and ppid in process_map and ppid != proc['pid']:
+                if ppid not in children_map:
+                    children_map[ppid] = []
+                children_map[ppid].append(proc)
+
+        # Find matching processes (by PID or Name)
+        matching_pids = set()
+        for proc in processes:
+            pid_str = str(proc['pid'])
+            name_lower = proc['name'].lower()
+
+            # Check if PID or name matches search
+            if search_text in pid_str or search_text in name_lower:
+                matching_pids.add(proc['pid'])
+
+        # Recursively get all children of matching processes
+        def get_all_children(pid):
+            """Recursively get all children PIDs"""
+            child_pids = set()
+            if pid in children_map:
+                for child in children_map[pid]:
+                    child_pid = child['pid']
+                    child_pids.add(child_pid)
+                    child_pids.update(get_all_children(child_pid))
+            return child_pids
+
+        # Add all children of matching processes
+        pids_to_show = set(matching_pids)
+        for pid in matching_pids:
+            pids_to_show.update(get_all_children(pid))
+
+        # Clear the tree
+        for item in self.process_tree.get_children():
+            self.process_tree.delete(item)
+        self.pid_to_tree_item.clear()
+
+        # Build filtered tree
+        def add_process_to_tree(proc, parent_id=""):
+            """Add process to tree with hierarchy"""
+            pid = proc['pid']
+            name = proc['name']
+            exe = proc.get('exe', 'N/A')
+
+            # Determine YARA match status
+            yara_status = "No"
+            tags = ()
+            if proc.get('threat_detected'):
+                yara_rule = proc.get('yara_rule', 'Unknown')
+                if yara_rule and yara_rule != 'Unknown':
+                    yara_status = f"⚠️ {yara_rule}"
+                else:
+                    matches = proc.get('yara_matches', 0)
+                    yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
+                tags = ('threat',)
+            elif name.lower() in ['system', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe']:
+                tags = ('system',)
+
+            # Insert into tree (expanded by default for filtered view)
+            item_id = self.process_tree.insert(
+                parent_id,
+                "end",
+                text=f"  {name}",
+                values=(pid, name, exe, yara_status),
+                tags=tags,
+                open=True  # Auto-expand
+            )
+
+            self.pid_to_tree_item[pid] = item_id
+
+            # Add children recursively if they should be shown
+            if pid in children_map:
+                for child in children_map[pid]:
+                    if child['pid'] in pids_to_show:
+                        add_process_to_tree(child, item_id)
+
+        # Add all filtered processes (root level only, children will be added recursively)
+        root_pids = []
+        for pid in pids_to_show:
+            if pid in process_map:
+                proc = process_map[pid]
+                ppid = proc.get('ppid')
+                # Check if parent is also in filtered set
+                if ppid not in pids_to_show or ppid not in process_map or ppid == proc['pid']:
+                    root_pids.append(pid)
+
+        # Sort and add root processes
+        for pid in sorted(root_pids):
+            if pid in process_map:
+                add_process_to_tree(process_map[pid])
+
+    def clear_process_search(self):
+        """Clear the process search and show all processes"""
+        self.process_search_entry.delete(0, tk.END)
+        self.refresh_process_list()
+
+    def get_child_pids_recursive(self, parent_pid):
+        """Get all child PIDs recursively for a given parent PID"""
+        child_pids = set()
+
+        # Get all processes
+        processes = self.process_monitor.get_all_processes()
+
+        # Build parent-child map
+        children_map = {}
+        for proc in processes:
+            ppid = proc.get('ppid')
+            if ppid:
+                if ppid not in children_map:
+                    children_map[ppid] = []
+                children_map[ppid].append(proc['pid'])
+
+        # Recursive function to get all children
+        def get_children(pid):
+            if pid in children_map:
+                for child_pid in children_map[pid]:
+                    child_pids.add(child_pid)
+                    get_children(child_pid)  # Recurse to get children of children
+
+        get_children(parent_pid)
+        return child_pids
+
     def show_process_context_menu(self, event):
         """Show right-click context menu for processes"""
         try:
@@ -3509,10 +3726,6 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                         event['result']
                     ))
 
-                # Auto-scroll to bottom
-                if events_tree.get_children():
-                    events_tree.see(events_tree.get_children()[-1])
-
                 # Update statistics
                 stats = monitor.get_stats()
                 stats_label.configure(
@@ -3761,28 +3974,101 @@ Risk Level: {risk_level}"""
             self.network_monitor_active = False
             self.btn_toggle_network_monitor.configure(text="▶ Start Monitoring")
     
+    def show_network_context_menu(self, event):
+        """Show right-click context menu for network connections"""
+        try:
+            self.network_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.network_context_menu.grab_release()
+
+    def copy_network_cell(self, column_index):
+        """Copy a specific cell from selected network row to clipboard"""
+        selection = self.network_tree.selection()
+        if not selection:
+            return
+
+        try:
+            item = self.network_tree.item(selection[0])
+            values = item['values']
+            if values and len(values) > column_index:
+                cell_value = str(values[column_index])
+                self.root.clipboard_clear()
+                self.root.clipboard_append(cell_value)
+                self.root.update()  # Keep clipboard after window closes
+        except Exception as e:
+            pass
+
+    def copy_network_row(self):
+        """Copy entire row from selected network connection to clipboard"""
+        selection = self.network_tree.selection()
+        if not selection:
+            return
+
+        try:
+            item = self.network_tree.item(selection[0])
+            values = item['values']
+            if values:
+                # Format: Type | Local | Remote | Hostname | Status | Process | Suspicious
+                row_text = " | ".join(str(v) for v in values)
+                self.root.clipboard_clear()
+                self.root.clipboard_append(row_text)
+                self.root.update()  # Keep clipboard after window closes
+        except Exception as e:
+            pass
+
+    def resolve_hostname(self, ip_address):
+        """Resolve IP address to hostname with caching"""
+        # Initialize hostname cache if not exists
+        if not hasattr(self, 'hostname_cache'):
+            self.hostname_cache = {}
+
+        # Check cache first
+        if ip_address in self.hostname_cache:
+            return self.hostname_cache[ip_address]
+
+        # Skip resolution for local/private IPs
+        if ip_address in ['', '0.0.0.0', '127.0.0.1', 'localhost', '*']:
+            self.hostname_cache[ip_address] = '-'
+            return '-'
+
+        # Try to resolve
+        try:
+            import socket
+            hostname = socket.gethostbyaddr(ip_address)[0]
+            self.hostname_cache[ip_address] = hostname
+            return hostname
+        except:
+            # If resolution fails, just use the IP
+            self.hostname_cache[ip_address] = '-'
+            return '-'
+
     def refresh_network_list(self):
         """Refresh network connections list"""
         # Clear existing
         for item in self.network_tree.get_children():
             self.network_tree.delete(item)
-        
+
         # Get connections
         connections = self.network_monitor.get_all_connections()
-        
+
         for conn in connections:
             local_addr = f"{conn.get('local_ip', '')}:{conn.get('local_port', '')}"
             remote_addr = f"{conn.get('remote_ip', '')}:{conn.get('remote_port', '')}"
-            
+
+            # Resolve hostname for remote IP
+            remote_ip = conn.get('remote_ip', '')
+            hostname = self.resolve_hostname(remote_ip) if remote_ip else '-'
+
             suspicious_text = "Yes" if conn.get('suspicious', False) else "No"
             tags = ('suspicious',) if conn.get('suspicious', False) else ()
-            
+
             self.network_tree.insert(
                 "", "end",
                 values=(
                     conn.get('type', ''),
                     local_addr,
                     remote_addr,
+                    hostname,
                     conn.get('status', ''),
                     conn.get('process_name', 'Unknown'),
                     suspicious_text

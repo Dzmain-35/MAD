@@ -318,11 +318,16 @@ class CaseManager:
         thq_family = self.get_thq_family(md5)
         print(f"  THQ Family: {thq_family}")
         
+        # Check if file is whitelisted
+        is_whitelisted = sha256.lower() in self.whitelisted_hashes
+        if is_whitelisted:
+            print(f"✓ File is WHITELISTED")
+
         # Calculate threat score
         threat_score = self.calculate_threat_score(yara_matches, vt_hits)
         threat_level = self.get_threat_level(threat_score)
         print(f"Threat Score: {threat_score} ({threat_level})")
-        
+
         # Compile file information
         file_info = {
             "filename": filename,
@@ -332,7 +337,7 @@ class CaseManager:
             "sha256": sha256,
             "imphash": imphash,
             "file_size": file_size,
-            "whitelisted": False,
+            "whitelisted": is_whitelisted,
             "yara_matches": yara_matches,
             "vt_hits": vt_hits,
             "vt_family": vt_family,

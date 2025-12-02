@@ -29,6 +29,7 @@ else:
 
 # Windows API Constants
 PROCESS_QUERY_INFORMATION = 0x0400
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000  # Works on protected processes
 PROCESS_VM_READ = 0x0010
 MEM_COMMIT = 0x1000
 MEM_PRIVATE = 0x20000
@@ -196,22 +197,56 @@ class MemoryStringExtractor:
             filter_regions = ['private', 'image', 'mapped']
         
         try:
-            # Open process with read permissions
+            # Multi-tiered process access strategy
+            # Try from most permissive to least permissive
+            h_process = None
+            access_level = "none"
+
+            # Tier 1: Try full memory read access (best case)
             h_process = OpenProcess(
                 PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
                 False,
                 pid
             )
 
+            if h_process:
+                access_level = "full"
+                if self.verbose:
+                    print(f"[MemoryExtractor] Successfully opened process {pid} with FULL access")
+            else:
+                # Tier 2: Try limited query without memory read (for protected processes)
+                if self.verbose:
+                    print(f"[MemoryExtractor] Full access denied for PID {pid}, trying limited access...")
+
+                h_process = OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION,
+                    False,
+                    pid
+                )
+
+                if h_process:
+                    access_level = "limited"
+                    if self.verbose:
+                        print(f"[MemoryExtractor] Opened process {pid} with LIMITED access (cannot read memory)")
+                    # For limited access, we can't read memory regions
+                    # Return minimal result with error
+                    CloseHandle(h_process)
+                    error_msg = f"Process {pid} opened with limited access only - memory reading not available (protected process)"
+                    result['errors'].append(error_msg)
+                    result['access_level'] = access_level
+                    if self.verbose:
+                        print(f"[MemoryExtractor] {error_msg}")
+                    return result
+
             if not h_process:
-                error_msg = f"Failed to open process {pid} (Access Denied or Invalid PID)"
+                error_msg = f"Failed to open process {pid} - Access Denied (likely protected system process)"
                 result['errors'].append(error_msg)
+                result['access_level'] = access_level
                 if self.verbose:
                     print(f"[MemoryExtractor] {error_msg}")
                 return result
 
-            if self.verbose:
-                print(f"[MemoryExtractor] Successfully opened process {pid}")
+            result['access_level'] = access_level
             
             try:
                 # Enumerate memory regions

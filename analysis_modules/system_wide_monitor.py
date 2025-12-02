@@ -38,6 +38,7 @@ class EventFilter:
     def __init__(self):
         self.event_types: Optional[List[str]] = None  # None = all types
         self.pid_filter: Optional[int] = None
+        self.pid_filter_set: Optional[set] = None  # For filtering by multiple PIDs (parent + children)
         self.path_regex: Optional[str] = None
         self.path_pattern = None
         self.time_start: Optional[datetime] = None
@@ -91,6 +92,16 @@ class EventFilter:
     def set_pid(self, pid: Optional[int]):
         """Set PID filter"""
         self.pid_filter = pid
+        # Clear pid_filter_set when setting single PID
+        if pid is None:
+            self.pid_filter_set = None
+
+    def set_pid_set(self, pids: Optional[set]):
+        """Set PID filter with multiple PIDs (for child process filtering)"""
+        self.pid_filter_set = pids
+        # If using pid set, clear single PID filter
+        if pids:
+            self.pid_filter = None
 
     def set_path_regex(self, regex: Optional[str]):
         """Set path regex filter"""
@@ -121,9 +132,13 @@ class EventFilter:
         if self.event_types and event.get('event_type') not in self.event_types:
             return False
 
-        # PID filter
-        if self.pid_filter is not None and event.get('pid') != self.pid_filter:
-            return False
+        # PID filter (single PID or set of PIDs)
+        if self.pid_filter_set is not None:
+            if event.get('pid') not in self.pid_filter_set:
+                return False
+        elif self.pid_filter is not None:
+            if event.get('pid') != self.pid_filter:
+                return False
 
         # Path regex filter
         if self.path_pattern and event.get('path'):

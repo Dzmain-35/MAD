@@ -790,6 +790,8 @@ class ForensicAnalysisGUI:
         
         # Configure tag colors
         self.process_tree.tag_configure('threat', background='#5c1c1c', foreground='white')
+        self.process_tree.tag_configure('new', background='#8B7500', foreground='white')  # Gold for new processes
+        self.process_tree.tag_configure('benign', background='#1a4d2e', foreground='white')  # Green for whitelisted/benign
         self.process_tree.tag_configure('system', foreground='#888888')
         
         self.analysis_subtabs["processes"] = frame
@@ -2451,15 +2453,30 @@ class ForensicAnalysisGUI:
         name_label.pack(anchor="w")
         
         # YARA and THQ matches display in one line
-        yara_display = self.case_manager.get_yara_display_text(yara_matches)
-        thq_display = thq_family if thq_family and thq_family != "Unknown" else "N/A"
-        
-        info_line = f"YARA: {yara_display}  |  THQ: {thq_display}"
-        
+        if is_whitelisted:
+            # Show BENIGN for whitelisted files
+            info_line = "✅ BENIGN (Whitelisted)"
+            label_color = "#2ecc71"  # Green for benign
+        else:
+            yara_display = self.case_manager.get_yara_display_text(yara_matches)
+            thq_display = thq_family if thq_family and thq_family != "Unknown" else "N/A"
+
+            info_line = f"YARA: {yara_display}  |  THQ: {thq_display}"
+
+            # Determine color: Red for YARA, Orange for THQ-only, Gray for neither
+            has_yara = bool(yara_matches)
+            has_thq = thq_family and thq_family not in ["Unknown", "N/A"]
+            if has_yara:
+                label_color = self.colors["red"]  # Red for YARA matches
+            elif has_thq:
+                label_color = "#FF8C00"  # Orange for THQ-only
+            else:
+                label_color = "gray60"
+
         yara_thq_label = ctk.CTkLabel(
-            left_frame, 
+            left_frame,
             text=info_line,
-            text_color=self.colors["red"] if (yara_matches or thq_family != "Unknown") else "gray60", 
+            text_color=label_color,
             font=ctk.CTkFont(size=12, weight="bold"),
             cursor="hand2"
         )
@@ -2701,6 +2718,11 @@ File Size: {file_info['file_size']} bytes"""
                         matches = proc.get('yara_matches', 0)
                         yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
                     tags = ('threat',)
+                elif proc.get('whitelisted', False):
+                    yara_status = "✅ BENIGN"
+                    tags = ('benign',)
+                elif pid in new_pids:
+                    tags = ('new',)
                 elif proc['name'].lower() in ['system', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe']:
                     tags = ('system',)
 
@@ -2758,6 +2780,11 @@ File Size: {file_info['file_size']} bytes"""
                         matches = proc.get('yara_matches', 0)
                         yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
                     tags = ('threat',)
+                elif proc.get('whitelisted', False):
+                    yara_status = "✅ BENIGN"
+                    tags = ('benign',)
+                elif pid in new_pids:
+                    tags = ('new',)
                 elif name.lower() in ['system', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe']:
                     tags = ('system',)
 

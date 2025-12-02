@@ -258,6 +258,11 @@ class SysmonLogMonitor:
             'dns_events': 0
         }
 
+        # Process info cache (stores process info from Sysmon events)
+        # Key: PID, Value: {'name': str, 'image': str, 'cmdline': str, 'user': str, 'create_time': datetime}
+        self.process_cache = {}
+        self.process_cache_max_size = 1000  # Limit cache size
+
         # Check if Sysmon is available
         self.sysmon_available = self._check_sysmon_available()
 
@@ -539,12 +544,78 @@ class SysmonLogMonitor:
         elif event.event_type == "DNS":
             self.stats['dns_events'] += 1
 
+        # Cache process information from ProcessCreate events
+        if event.pid and event.event_id == 1:  # ProcessCreate
+            self._cache_process_info(event.pid, event)
+
         # Notify callbacks
         for callback in self.event_callbacks:
             try:
                 callback(event)
             except Exception as e:
                 print(f"Error in event callback: {e}")
+
+    def _cache_process_info(self, pid: int, event: SysmonEvent):
+        """
+        Cache process information from Sysmon event
+
+        Args:
+            pid: Process ID
+            event: Sysmon event containing process information
+        """
+        # Only cache from ProcessCreate events (Event ID 1) as they have the most complete info
+        if event.event_id != 1:
+            return
+
+        # Extract process information from event details
+        details = event.detail if event.detail else {}
+
+        process_info = {
+            'pid': pid,
+            'name': event.process_name,
+            'image': event.path if event.event_id == 1 else None,
+            'cmdline': details.get('CommandLine', ''),
+            'user': event.user,
+            'create_time': event.timestamp,
+            'parent_pid': details.get('ParentProcessId'),
+            'parent_image': details.get('ParentImage'),
+            'access_method': 'sysmon_cache'
+        }
+
+        # Add to cache
+        self.process_cache[pid] = process_info
+
+        # Enforce cache size limit (remove oldest entries)
+        if len(self.process_cache) > self.process_cache_max_size:
+            # Remove oldest 10% of entries
+            to_remove = len(self.process_cache) - int(self.process_cache_max_size * 0.9)
+            for _ in range(to_remove):
+                self.process_cache.pop(next(iter(self.process_cache)))
+
+    def get_cached_process_info(self, pid: int) -> Optional[Dict]:
+        """
+        Get cached process information for a PID
+
+        Args:
+            pid: Process ID
+
+        Returns:
+            Process info dictionary or None if not cached
+        """
+        return self.process_cache.get(pid)
+
+    def get_all_cached_processes(self) -> List[Dict]:
+        """
+        Get all cached process information
+
+        Returns:
+            List of process info dictionaries
+        """
+        return list(self.process_cache.values())
+
+    def clear_process_cache(self):
+        """Clear the process info cache"""
+        self.process_cache.clear()
 
     def get_recent_events(self, count: int = 100, event_type: Optional[str] = None) -> List[Dict]:
         """

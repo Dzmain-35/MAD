@@ -24,6 +24,22 @@ except (ImportError, OSError) as e:
     MEMORY_EXTRACTION_AVAILABLE = False
     print(f"WARNING: Memory string extractor not available ({e}). Using fallback method.")
 
+# WMI-based process info (fallback for protected processes)
+try:
+    from .wmi_process_info import WMIProcessInfo
+    WMI_AVAILABLE = True
+except (ImportError, OSError) as e:
+    WMI_AVAILABLE = False
+    print(f"INFO: WMI process info not available ({e}). Install 'wmi' package for enhanced access.")
+
+# Privilege helper for SeDebugPrivilege
+try:
+    from .privilege_helper import PrivilegeHelper, enable_debug_privilege
+    PRIVILEGE_HELPER_AVAILABLE = True
+except (ImportError, OSError) as e:
+    PRIVILEGE_HELPER_AVAILABLE = False
+    print(f"INFO: Privilege helper not available ({e}).")
+
 
 class ProcessMonitor:
     def __init__(self, yara_rules_path: str):
@@ -56,7 +72,32 @@ class ProcessMonitor:
         else:
             self.memory_extractor = None
             print("ℹ Memory string extractor not available, using fallback method")
-        
+
+        # Initialize WMI fallback if available
+        if WMI_AVAILABLE:
+            try:
+                self.wmi_info = WMIProcessInfo(verbose=False)
+                print("✓ WMI process info initialized (fallback for protected processes)")
+            except Exception as e:
+                print(f"INFO: WMI not available: {e}")
+                self.wmi_info = None
+        else:
+            self.wmi_info = None
+
+        # Attempt to enable SeDebugPrivilege for better process access
+        if PRIVILEGE_HELPER_AVAILABLE:
+            try:
+                self.privilege_helper = PrivilegeHelper(verbose=False)
+                if self.privilege_helper.enable_debug_privilege():
+                    print("✓ SeDebugPrivilege enabled (enhanced process access)")
+                else:
+                    print("ℹ SeDebugPrivilege not available (limited access to protected processes)")
+            except Exception as e:
+                print(f"INFO: Could not enable SeDebugPrivilege: {e}")
+                self.privilege_helper = None
+        else:
+            self.privilege_helper = None
+
         # Load YARA rules
         self.load_yara_rules()
         
@@ -194,17 +235,18 @@ class ProcessMonitor:
     
     def get_process_info(self, pid: int) -> Optional[Dict]:
         """
-        Get detailed information about a process
-        
+        Get detailed information about a process using multi-tiered approach
+
         Args:
             pid: Process ID
-            
+
         Returns:
             Dictionary with process information or None if error
         """
+        # Tier 1: Try psutil (fastest, most detailed for accessible processes)
         try:
             proc = psutil.Process(pid)
-            
+
             # Get basic info
             with proc.oneshot():
                 info = {
@@ -216,8 +258,9 @@ class ProcessMonitor:
                     "create_time": datetime.fromtimestamp(proc.create_time()).isoformat(),
                     "status": proc.status(),
                     "username": proc.username() if proc.username() else "N/A",
+                    "access_method": "psutil",
                 }
-                
+
                 # Get resource usage
                 try:
                     info["cpu_percent"] = proc.cpu_percent(interval=0.1)
@@ -225,7 +268,7 @@ class ProcessMonitor:
                     info["num_threads"] = proc.num_threads()
                 except:
                     pass
-                
+
                 # Get parent process
                 try:
                     parent = proc.parent()
@@ -234,7 +277,7 @@ class ProcessMonitor:
                 except:
                     info["parent_pid"] = None
                     info["parent_name"] = None
-                
+
                 # Get network connections
                 try:
                     connections = proc.connections()
@@ -251,11 +294,27 @@ class ProcessMonitor:
                         info["connections"].append(conn_info)
                 except:
                     info["connections"] = []
-            
+
             return info
-            
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+
+        except psutil.AccessDenied:
+            # Tier 2: Try WMI fallback for protected processes
+            if self.wmi_info:
+                try:
+                    wmi_result = self.wmi_info.get_process_info(pid)
+                    if wmi_result:
+                        print(f"ℹ Using WMI fallback for protected process PID {pid}")
+                        return wmi_result
+                except Exception as e:
+                    print(f"WMI fallback failed for PID {pid}: {e}")
+
+            # Both methods failed
+            print(f"Access denied for PID {pid} (protected system process)")
             return None
+
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            return None
+
         except Exception as e:
             print(f"Error getting process info for PID {pid}: {e}")
             return None

@@ -67,6 +67,7 @@ class ForensicAnalysisGUI:
         self.auto_refresh_interval = 2000  # 2 seconds
         self.auto_refresh_job = None
         self.pid_to_tree_item = {}  # Track PIDs to tree item IDs for incremental updates
+        self.process_tree_initial_load = True  # Track if this is the first process list load
 
         # Procmon live monitors (PID -> monitor instance)
         self.procmon_monitors = {}
@@ -2653,9 +2654,15 @@ File Size: {file_info['file_size']} bytes"""
         existing_pids = set(self.pid_to_tree_item.keys())
 
         # Determine what changed
-        new_pids = current_pids - existing_pids
+        pids_to_add = current_pids - existing_pids  # PIDs that need to be added to tree
         dead_pids = existing_pids - current_pids
         potentially_updated_pids = current_pids & existing_pids
+
+        # Only mark as "new" (yellow highlight) if this is not the initial load
+        if self.process_tree_initial_load:
+            new_pids = set()  # Don't highlight any as new on initial load
+        else:
+            new_pids = pids_to_add  # After initial load, newly added PIDs are truly new
 
         # Save expanded and selected state
         expanded_pids = set()
@@ -2733,10 +2740,12 @@ File Size: {file_info['file_size']} bytes"""
                 # If error, mark for re-adding
                 if pid in self.pid_to_tree_item:
                     del self.pid_to_tree_item[pid]
-                new_pids.add(pid)
+                pids_to_add.add(pid)
+                if not self.process_tree_initial_load:
+                    new_pids.add(pid)  # Also mark as new if not initial load
 
         # Add new processes - use full rebuild for new processes to maintain hierarchy
-        if new_pids:
+        if pids_to_add:
             # Build parent-child relationships for all processes
             children_map = {}
             root_processes = []
@@ -2808,12 +2817,12 @@ File Size: {file_info['file_size']} bytes"""
 
             # Add new root processes and their trees
             for proc in root_processes:
-                if proc['pid'] in new_pids or proc['pid'] not in self.pid_to_tree_item:
+                if proc['pid'] in pids_to_add or proc['pid'] not in self.pid_to_tree_item:
                     add_process_tree(proc)
 
             # Add any remaining new child processes that weren't added as part of root process trees
             # This handles the case where a new child process appears under an existing parent
-            remaining_new_pids = [pid for pid in new_pids if pid not in self.pid_to_tree_item]
+            remaining_new_pids = [pid for pid in pids_to_add if pid not in self.pid_to_tree_item]
             for pid in remaining_new_pids:
                 if pid in process_map:
                     proc = process_map[pid]
@@ -2838,6 +2847,10 @@ File Size: {file_info['file_size']} bytes"""
                 self.process_tree.see(self.pid_to_tree_item[selected_pid])
             except:
                 pass
+
+        # Mark initial load as complete
+        if self.process_tree_initial_load:
+            self.process_tree_initial_load = False
 
     def filter_processes(self):
         """Filter processes by PID or Name, showing matching processes and all their children"""

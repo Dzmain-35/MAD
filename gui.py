@@ -652,7 +652,17 @@ class ForensicAnalysisGUI:
             hover_color=self.colors["red_dark"]
         )
         self.btn_toggle_process_monitor.pack(side="right", padx=5)
-        
+
+        # Scan All button
+        btn_scan_all = ctk.CTkButton(
+            header, text="🔍 Scan All",
+            command=self.scan_all_processes,
+            height=35, width=100,
+            fg_color="#8B4513",
+            hover_color="#A0522D"
+        )
+        btn_scan_all.pack(side="right", padx=5)
+
         # Refresh button
         btn_refresh = ctk.CTkButton(
             header, text="🔄 Refresh",
@@ -693,6 +703,27 @@ class ForensicAnalysisGUI:
             hover_color="gray40"
         )
         btn_clear_search.pack(side="left", padx=5)
+
+        # Filter dropdown
+        filter_label = ctk.CTkLabel(search_frame, text="Filter:",
+                                    font=ctk.CTkFont(size=12),
+                                    text_color="white")
+        filter_label.pack(side="left", padx=(20, 10))
+
+        self.process_filter_var = ctk.StringVar(value="All Processes")
+        self.process_filter_dropdown = ctk.CTkComboBox(
+            search_frame,
+            values=["All Processes", "YARA Matches Only", "Benign Only", "Not Scanned"],
+            variable=self.process_filter_var,
+            command=lambda choice: self.filter_processes(),
+            height=35,
+            width=180,
+            fg_color="gray20",
+            border_color=self.colors["navy"],
+            button_color=self.colors["navy"],
+            button_hover_color=self.colors["dark_blue"]
+        )
+        self.process_filter_dropdown.pack(side="left", padx=5)
 
         # Process tree area with parent-child hierarchy
         tree_frame = ctk.CTkFrame(frame, fg_color="gray20")
@@ -2720,7 +2751,13 @@ File Size: {file_info['file_size']} bytes"""
                 if proc.get('threat_detected'):
                     yara_rule = proc.get('yara_rule', 'Unknown')
                     if yara_rule and yara_rule != 'Unknown':
-                        yara_status = f"⚠️ {yara_rule}"
+                        # Check if there are multiple rules
+                        scan_results = proc.get('scan_results', {})
+                        all_rules = scan_results.get('all_rules', [yara_rule])
+                        if len(all_rules) > 1:
+                            yara_status = f"⚠️ {yara_rule} +{len(all_rules) - 1}"
+                        else:
+                            yara_status = f"⚠️ {yara_rule}"
                     else:
                         matches = proc.get('yara_matches', 0)
                         yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
@@ -2784,7 +2821,13 @@ File Size: {file_info['file_size']} bytes"""
                 if proc.get('threat_detected'):
                     yara_rule = proc.get('yara_rule', 'Unknown')
                     if yara_rule and yara_rule != 'Unknown':
-                        yara_status = f"⚠️ {yara_rule}"
+                        # Check if there are multiple rules
+                        scan_results = proc.get('scan_results', {})
+                        all_rules = scan_results.get('all_rules', [yara_rule])
+                        if len(all_rules) > 1:
+                            yara_status = f"⚠️ {yara_rule} +{len(all_rules) - 1}"
+                        else:
+                            yara_status = f"⚠️ {yara_rule}"
                     else:
                         matches = proc.get('yara_matches', 0)
                         yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
@@ -2855,9 +2898,10 @@ File Size: {file_info['file_size']} bytes"""
     def filter_processes(self):
         """Filter processes by PID or Name, showing matching processes and all their children"""
         search_text = self.process_search_entry.get().strip().lower()
+        filter_choice = self.process_filter_var.get() if hasattr(self, 'process_filter_var') else "All Processes"
 
-        if not search_text:
-            # If search is empty, refresh to show all
+        # If no filters applied, refresh to show all
+        if not search_text and filter_choice == "All Processes":
             self.refresh_process_list()
             return
 
@@ -2874,14 +2918,26 @@ File Size: {file_info['file_size']} bytes"""
                     children_map[ppid] = []
                 children_map[ppid].append(proc)
 
-        # Find matching processes (by PID or Name)
+        # Find matching processes (by PID, Name, and Filter)
         matching_pids = set()
         for proc in processes:
             pid_str = str(proc['pid'])
             name_lower = proc['name'].lower()
 
-            # Check if PID or name matches search
-            if search_text in pid_str or search_text in name_lower:
+            # Check search text
+            search_match = not search_text or (search_text in pid_str or search_text in name_lower)
+
+            # Check filter
+            filter_match = True
+            if filter_choice == "YARA Matches Only":
+                filter_match = proc.get('threat_detected', False) and proc.get('yara_rule')
+            elif filter_choice == "Benign Only":
+                filter_match = proc.get('whitelisted', False)
+            elif filter_choice == "Not Scanned":
+                filter_match = not proc.get('threat_detected', False) and not proc.get('whitelisted', False)
+
+            # Add if both conditions match
+            if search_match and filter_match:
                 matching_pids.add(proc['pid'])
 
         # Recursively get all children of matching processes
@@ -2918,7 +2974,13 @@ File Size: {file_info['file_size']} bytes"""
             if proc.get('threat_detected'):
                 yara_rule = proc.get('yara_rule', 'Unknown')
                 if yara_rule and yara_rule != 'Unknown':
-                    yara_status = f"⚠️ {yara_rule}"
+                    # Check if there are multiple rules
+                    scan_results = proc.get('scan_results', {})
+                    all_rules = scan_results.get('all_rules', [yara_rule])
+                    if len(all_rules) > 1:
+                        yara_status = f"⚠️ {yara_rule} +{len(all_rules) - 1}"
+                    else:
+                        yara_status = f"⚠️ {yara_rule}"
                 else:
                     matches = proc.get('yara_matches', 0)
                     yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
@@ -3060,7 +3122,7 @@ File Size: {file_info['file_size']} bytes"""
 
                         alert = ctk.CTkToplevel(self.root)
                         alert.title("⚠️ Threat Detected")
-                        alert.geometry("500x350")
+                        alert.geometry("600x500")
                         alert.attributes('-topmost', True)
 
                         frame = ctk.CTkFrame(alert, fg_color=self.colors["red_dark"])
@@ -3074,19 +3136,17 @@ File Size: {file_info['file_size']} bytes"""
                         )
                         title.pack(pady=20)
 
+                        # Get all matched rules
+                        all_rules = result.get('all_rules', [rule])
+                        rules_display = ', '.join(all_rules) if len(all_rules) > 1 else rule
+
                         details = f"""PID: {pid}
 Name: {proc_name}
 Path: {proc_exe}
 
-YARA Rule: {rule}
+YARA Rule(s): {rules_display}
 Threat Score: {threat_score}
 Risk Level: {risk_level}"""
-
-                        if strings:
-                            details += f"\n\nMatched Strings ({len(strings)}):"
-                            for s in strings[:3]:  # Show first 3
-                                s_display = s[:40] + "..." if len(s) > 40 else s
-                                details += f"\n  • {s_display}"
 
                         details_label = ctk.CTkLabel(
                             frame,
@@ -3095,6 +3155,32 @@ Risk Level: {risk_level}"""
                             justify="left"
                         )
                         details_label.pack(pady=10, padx=20)
+
+                        # Show all matched strings in a scrollable text widget
+                        if strings:
+                            strings_label = ctk.CTkLabel(
+                                frame,
+                                text=f"Matched Strings ({len(strings)}):",
+                                font=ctk.CTkFont(size=12, weight="bold"),
+                                text_color="white"
+                            )
+                            strings_label.pack(pady=(10, 5), padx=20, anchor="w")
+
+                            strings_frame = ctk.CTkScrollableFrame(frame, height=150, fg_color="#2b2b2b")
+                            strings_frame.pack(pady=5, padx=20, fill="both", expand=True)
+
+                            # Display all strings
+                            for i, s in enumerate(strings, 1):
+                                s_display = s[:100] + "..." if len(s) > 100 else s
+                                string_label = ctk.CTkLabel(
+                                    strings_frame,
+                                    text=f"{i}. {s_display}",
+                                    font=ctk.CTkFont(size=10),
+                                    text_color="white",
+                                    anchor="w",
+                                    justify="left"
+                                )
+                                string_label.pack(anchor="w", pady=2, padx=5)
 
                         btn_close = ctk.CTkButton(
                             frame,
@@ -3114,7 +3200,133 @@ Risk Level: {risk_level}"""
                 self.root.after(0, self.refresh_process_list)
 
         threading.Thread(target=scan, daemon=True).start()
-    
+
+    def scan_all_processes(self):
+        """Scan all processes with YARA"""
+        # Confirm action
+        if not messagebox.askyesno("Confirm Scan All",
+                                   "This will scan ALL running processes. This may take some time.\n\nContinue?"):
+            return
+
+        # Get all processes
+        processes = self.process_monitor.get_all_processes()
+        total_processes = len(processes)
+
+        # Create progress window
+        progress_window = ctk.CTkToplevel(self.root)
+        progress_window.title("Scanning Processes")
+        progress_window.geometry("500x200")
+        progress_window.attributes('-topmost', True)
+
+        frame = ctk.CTkFrame(progress_window, fg_color="gray20")
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        title_label = ctk.CTkLabel(
+            frame,
+            text="Scanning All Processes",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="white"
+        )
+        title_label.pack(pady=10)
+
+        progress_label = ctk.CTkLabel(
+            frame,
+            text=f"Scanning process 0 of {total_processes}",
+            font=ctk.CTkFont(size=12),
+            text_color="white"
+        )
+        progress_label.pack(pady=10)
+
+        progress_bar = ctk.CTkProgressBar(frame, width=400)
+        progress_bar.pack(pady=10)
+        progress_bar.set(0)
+
+        stats_label = ctk.CTkLabel(
+            frame,
+            text="Threats found: 0 | Benign: 0 | Errors: 0",
+            font=ctk.CTkFont(size=11),
+            text_color="white"
+        )
+        stats_label.pack(pady=10)
+
+        # Scan statistics
+        scan_stats = {
+            'scanned': 0,
+            'threats': 0,
+            'benign': 0,
+            'errors': 0
+        }
+
+        # Scan in background thread
+        def scan_all():
+            for i, proc in enumerate(processes):
+                pid = proc['pid']
+
+                # Update progress
+                self.root.after(0, lambda i=i: progress_label.configure(
+                    text=f"Scanning PID {pid} ({i+1} of {total_processes})"
+                ))
+                self.root.after(0, lambda i=i: progress_bar.set((i + 1) / total_processes))
+
+                # Scan process
+                try:
+                    result = self.process_monitor.scan_process(pid)
+
+                    if 'error' not in result:
+                        matches_found = result.get('matches_found', False)
+                        rule = result.get('rule', 'No_YARA_Hit')
+
+                        # Update monitored_processes
+                        if pid not in self.process_monitor.monitored_processes:
+                            self.process_monitor.monitored_processes[pid] = {
+                                'pid': pid,
+                                'name': proc['name'],
+                                'exe': proc.get('exe', 'N/A'),
+                                'scan_results': result,
+                                'threat_detected': matches_found,
+                                'yara_rule': rule if matches_found else None
+                            }
+                        else:
+                            self.process_monitor.monitored_processes[pid]['scan_results'] = result
+                            self.process_monitor.monitored_processes[pid]['threat_detected'] = matches_found
+                            self.process_monitor.monitored_processes[pid]['yara_rule'] = rule if matches_found else None
+
+                        # Update stats
+                        if matches_found and rule != 'No_YARA_Hit':
+                            scan_stats['threats'] += 1
+                        else:
+                            scan_stats['benign'] += 1
+                    else:
+                        scan_stats['errors'] += 1
+
+                    scan_stats['scanned'] += 1
+
+                    # Update stats display
+                    self.root.after(0, lambda: stats_label.configure(
+                        text=f"Threats found: {scan_stats['threats']} | Benign: {scan_stats['benign']} | Errors: {scan_stats['errors']}"
+                    ))
+
+                except Exception as e:
+                    scan_stats['errors'] += 1
+                    print(f"[ERROR] Failed to scan PID {pid}: {e}")
+
+            # Scan complete
+            self.root.after(0, lambda: progress_label.configure(text="Scan Complete!"))
+            self.root.after(0, self.refresh_process_list)
+
+            # Show summary
+            summary_msg = f"""Scan Complete!
+
+Total Scanned: {scan_stats['scanned']}
+Threats Detected: {scan_stats['threats']}
+Benign Processes: {scan_stats['benign']}
+Errors: {scan_stats['errors']}"""
+
+            self.root.after(0, lambda: messagebox.showinfo("Scan Complete", summary_msg))
+            self.root.after(0, progress_window.destroy)
+
+        threading.Thread(target=scan_all, daemon=True).start()
+
     # FIXED: Combined view_process_details and extract_strings into one method
     def view_process_details_and_strings(self):
         """View detailed process information and extracted strings in a unified window"""
@@ -3236,14 +3448,24 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 details += f"\n{'='*80}\n"
                 details += "⚠️ YARA SCAN RESULTS\n"
                 details += f"{'='*80}\n"
-                details += f"Rule Matched: {scan_results.get('rule', 'Unknown')}\n"
+
+                # Show all matched rules
+                all_rules = scan_results.get('all_rules', [scan_results.get('rule', 'Unknown')])
+                if len(all_rules) > 1:
+                    details += f"Rules Matched ({len(all_rules)}):\n"
+                    for i, rule in enumerate(all_rules, 1):
+                        details += f"  {i}. {rule}\n"
+                else:
+                    details += f"Rule Matched: {all_rules[0]}\n"
+
                 details += f"Threat Score: {scan_results.get('threat_score', 0)}\n"
                 details += f"Risk Level: {scan_results.get('risk_level', 'Unknown')}\n"
-                
+
+                # Show all matched strings
                 if scan_results.get('strings'):
-                    details += f"\nMatched Strings:\n"
-                    for s in scan_results['strings'][:10]:
-                        details += f"  - {s}\n"
+                    details += f"\nMatched Strings ({len(scan_results['strings'])}):\n"
+                    for i, s in enumerate(scan_results['strings'], 1):
+                        details += f"  {i}. {s}\n"
         
         info_text = tk.Text(
             info_frame,
@@ -3946,12 +4168,13 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             rule = scan_results.get('rule', 'Unknown')
             threat_score = scan_results.get('threat_score', 0)
             risk_level = scan_results.get('risk_level', 'Unknown')
+            strings = scan_results.get('strings', [])
 
             # Show alert in GUI thread
             def show_alert():
                 alert = ctk.CTkToplevel(self.root)
                 alert.title("⚠️ Threat Detected")
-                alert.geometry("500x300")
+                alert.geometry("600x500")
                 alert.attributes('-topmost', True)
 
                 frame = ctk.CTkFrame(alert, fg_color=self.colors["red_dark"])
@@ -3965,11 +4188,15 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 )
                 title.pack(pady=20)
 
+                # Get all matched rules
+                all_rules = scan_results.get('all_rules', [rule])
+                rules_display = ', '.join(all_rules) if len(all_rules) > 1 else rule
+
                 details = f"""PID: {proc_info['pid']}
 Name: {proc_info['name']}
 Path: {proc_info['exe']}
 
-YARA Rule: {rule}
+YARA Rule(s): {rules_display}
 Threat Score: {threat_score}
 Risk Level: {risk_level}"""
 
@@ -3980,6 +4207,32 @@ Risk Level: {risk_level}"""
                     justify="left"
                 )
                 details_label.pack(pady=10, padx=20)
+
+                # Show all matched strings in a scrollable text widget
+                if strings:
+                    strings_label = ctk.CTkLabel(
+                        frame,
+                        text=f"Matched Strings ({len(strings)}):",
+                        font=ctk.CTkFont(size=12, weight="bold"),
+                        text_color="white"
+                    )
+                    strings_label.pack(pady=(10, 5), padx=20, anchor="w")
+
+                    strings_frame = ctk.CTkScrollableFrame(frame, height=150, fg_color="#2b2b2b")
+                    strings_frame.pack(pady=5, padx=20, fill="both", expand=True)
+
+                    # Display all strings
+                    for i, s in enumerate(strings, 1):
+                        s_display = s[:100] + "..." if len(s) > 100 else s
+                        string_label = ctk.CTkLabel(
+                            strings_frame,
+                            text=f"{i}. {s_display}",
+                            font=ctk.CTkFont(size=10),
+                            text_color="white",
+                            anchor="w",
+                            justify="left"
+                        )
+                        string_label.pack(anchor="w", pady=2, padx=5)
 
                 btn_close = ctk.CTkButton(
                     frame,

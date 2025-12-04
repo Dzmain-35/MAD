@@ -38,46 +38,69 @@ FONT_FAMILIES = {
 }
 
 
+# Descriptor for lazy font initialization
+class _FontDescriptor:
+    """Descriptor that creates fonts on first access (lazy initialization)"""
+
+    def __init__(self, key, size, weight):
+        self.key = key
+        self.size = size
+        self.weight = weight
+
+    def __get__(self, obj, objtype=None):
+        """Create and cache font on first access"""
+        if self.key not in objtype._cache:
+            objtype._cache[self.key] = ctk.CTkFont(size=self.size, weight=self.weight)
+        return objtype._cache[self.key]
+
+
 # Standardized Font Objects
 # These are reusable font instances for common UI elements
 class Fonts:
-    """Centralized font definitions for the MAD application"""
+    """Centralized font definitions for the MAD application
+
+    Uses lazy initialization to create fonts only after tkinter root window exists.
+    Fonts are created on first access and cached for reuse.
+    """
+
+    # Cache for font objects
+    _cache = {}
 
     # Logo and branding
-    logo_main = ctk.CTkFont(size=FONT_SIZES["logo"], weight=FONT_WEIGHTS["bold"])
-    logo_emoji = ctk.CTkFont(size=80)
-    logo_subtitle = ctk.CTkFont(size=FONT_SIZES["xl"], weight=FONT_WEIGHTS["bold"])
+    logo_main = _FontDescriptor("logo_main", FONT_SIZES["logo"], FONT_WEIGHTS["bold"])
+    logo_emoji = _FontDescriptor("logo_emoji", 80, FONT_WEIGHTS["regular"])
+    logo_subtitle = _FontDescriptor("logo_subtitle", FONT_SIZES["xl"], FONT_WEIGHTS["bold"])
 
     # Headers and titles
-    header_main = ctk.CTkFont(size=FONT_SIZES["3xl"], weight=FONT_WEIGHTS["bold"])
-    header_section = ctk.CTkFont(size=FONT_SIZES["2xl"], weight=FONT_WEIGHTS["bold"])
-    header_subsection = ctk.CTkFont(size=FONT_SIZES["xl"], weight=FONT_WEIGHTS["bold"])
+    header_main = _FontDescriptor("header_main", FONT_SIZES["3xl"], FONT_WEIGHTS["bold"])
+    header_section = _FontDescriptor("header_section", FONT_SIZES["2xl"], FONT_WEIGHTS["bold"])
+    header_subsection = _FontDescriptor("header_subsection", FONT_SIZES["xl"], FONT_WEIGHTS["bold"])
 
     # Titles
-    title_large = ctk.CTkFont(size=FONT_SIZES["lg"], weight=FONT_WEIGHTS["bold"])
-    title_medium = ctk.CTkFont(size=FONT_SIZES["md"], weight=FONT_WEIGHTS["bold"])
+    title_large = _FontDescriptor("title_large", FONT_SIZES["lg"], FONT_WEIGHTS["bold"])
+    title_medium = _FontDescriptor("title_medium", FONT_SIZES["md"], FONT_WEIGHTS["bold"])
 
     # Body text
-    body_large = ctk.CTkFont(size=FONT_SIZES["base"], weight=FONT_WEIGHTS["regular"])
-    body_large_bold = ctk.CTkFont(size=FONT_SIZES["base"], weight=FONT_WEIGHTS["bold"])
-    body = ctk.CTkFont(size=FONT_SIZES["sm"], weight=FONT_WEIGHTS["regular"])
-    body_bold = ctk.CTkFont(size=FONT_SIZES["sm"], weight=FONT_WEIGHTS["bold"])
+    body_large = _FontDescriptor("body_large", FONT_SIZES["base"], FONT_WEIGHTS["regular"])
+    body_large_bold = _FontDescriptor("body_large_bold", FONT_SIZES["base"], FONT_WEIGHTS["bold"])
+    body = _FontDescriptor("body", FONT_SIZES["sm"], FONT_WEIGHTS["regular"])
+    body_bold = _FontDescriptor("body_bold", FONT_SIZES["sm"], FONT_WEIGHTS["bold"])
 
     # Labels and inputs
-    label_large = ctk.CTkFont(size=FONT_SIZES["base"], weight=FONT_WEIGHTS["bold"])
-    label = ctk.CTkFont(size=FONT_SIZES["sm"], weight=FONT_WEIGHTS["bold"])
-    input_field = ctk.CTkFont(size=FONT_SIZES["base"], weight=FONT_WEIGHTS["regular"])
+    label_large = _FontDescriptor("label_large", FONT_SIZES["base"], FONT_WEIGHTS["bold"])
+    label = _FontDescriptor("label", FONT_SIZES["sm"], FONT_WEIGHTS["bold"])
+    input_field = _FontDescriptor("input_field", FONT_SIZES["base"], FONT_WEIGHTS["regular"])
 
     # Buttons
-    button_large = ctk.CTkFont(size=FONT_SIZES["base"], weight=FONT_WEIGHTS["bold"])
-    button = ctk.CTkFont(size=FONT_SIZES["sm"], weight=FONT_WEIGHTS["bold"])
+    button_large = _FontDescriptor("button_large", FONT_SIZES["base"], FONT_WEIGHTS["bold"])
+    button = _FontDescriptor("button", FONT_SIZES["sm"], FONT_WEIGHTS["bold"])
 
     # Navigation
-    nav_button = ctk.CTkFont(size=FONT_SIZES["base"], weight=FONT_WEIGHTS["bold"])
+    nav_button = _FontDescriptor("nav_button", FONT_SIZES["base"], FONT_WEIGHTS["bold"])
 
     # Helper and status text
-    helper = ctk.CTkFont(size=FONT_SIZES["xs"], weight=FONT_WEIGHTS["regular"])
-    status = ctk.CTkFont(size=FONT_SIZES["xs"], weight=FONT_WEIGHTS["regular"])
+    helper = _FontDescriptor("helper", FONT_SIZES["xs"], FONT_WEIGHTS["regular"])
+    status = _FontDescriptor("status", FONT_SIZES["xs"], FONT_WEIGHTS["regular"])
 
     # Special purpose fonts with specific families
     @staticmethod

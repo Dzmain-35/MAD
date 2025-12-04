@@ -116,17 +116,26 @@ class Fonts:
 
 # Legacy mapping for gradual migration
 # Maps old inline declarations to new font objects
-FONT_MAP = {
-    (12, "normal"): Fonts.body,
-    (12, "bold"): Fonts.body_bold,
-    (14, "normal"): Fonts.body_large,
-    (14, "bold"): Fonts.label_large,
-    (16, "bold"): Fonts.title_medium,
-    (18, "bold"): Fonts.title_large,
-    (20, "bold"): Fonts.header_subsection,
-    (24, "bold"): Fonts.header_section,
-    (28, "bold"): Fonts.header_main,
-}
+# Uses lazy initialization to avoid creating fonts at import time
+_FONT_MAP_CACHE = None
+
+
+def _get_font_map():
+    """Get the font mapping, creating it on first access"""
+    global _FONT_MAP_CACHE
+    if _FONT_MAP_CACHE is None:
+        _FONT_MAP_CACHE = {
+            (12, "normal"): Fonts.body,
+            (12, "bold"): Fonts.body_bold,
+            (14, "normal"): Fonts.body_large,
+            (14, "bold"): Fonts.label_large,
+            (16, "bold"): Fonts.title_medium,
+            (18, "bold"): Fonts.title_large,
+            (20, "bold"): Fonts.header_subsection,
+            (24, "bold"): Fonts.header_section,
+            (28, "bold"): Fonts.header_main,
+        }
+    return _FONT_MAP_CACHE
 
 
 def get_font(size, weight="normal"):
@@ -141,6 +150,7 @@ def get_font(size, weight="normal"):
         CTkFont object
     """
     key = (size, weight)
-    if key in FONT_MAP:
-        return FONT_MAP[key]
+    font_map = _get_font_map()
+    if key in font_map:
+        return font_map[key]
     return ctk.CTkFont(size=size, weight=weight)

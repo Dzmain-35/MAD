@@ -1919,20 +1919,34 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             def show_alert():
                 alert = ctk.CTkToplevel(self.root)
                 alert.title("⚠️ Threat Detected")
-                alert.geometry("500x300")
+                alert.geometry("600x400")
+                alert.minsize(500, 300)
                 alert.attributes('-topmost', True)
-                
-                frame = ctk.CTkFrame(alert, fg_color=self.colors["red_dark"])
-                frame.pack(fill="both", expand=True, padx=2, pady=2)
-                
+
+                # Main container frame
+                main_frame = ctk.CTkFrame(alert, fg_color=self.colors["red_dark"])
+                main_frame.pack(fill="both", expand=True, padx=2, pady=2)
+
+                # Header section
+                header_frame = ctk.CTkFrame(main_frame, fg_color=self.colors["red_dark"])
+                header_frame.pack(fill="x", padx=10, pady=(15, 10))
+
                 title = ctk.CTkLabel(
-                    frame,
+                    header_frame,
                     text="⚠️ MALICIOUS PROCESS DETECTED",
                     font=ctk.CTkFont(size=18, weight="bold"),
                     text_color="white"
                 )
-                title.pack(pady=20)
-                
+                title.pack()
+
+                # Content section
+                content_frame = ctk.CTkFrame(main_frame, fg_color=self.colors["red_dark"])
+                content_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+                # Details section
+                details_frame = ctk.CTkFrame(content_frame, fg_color="#1a1a1a", corner_radius=8)
+                details_frame.pack(fill="x", padx=10, pady=10)
+
                 details = f"""PID: {proc_info['pid']}
 Name: {proc_info['name']}
 Path: {proc_info['exe']}
@@ -1940,23 +1954,30 @@ Path: {proc_info['exe']}
 YARA Rule: {rule}
 Threat Score: {threat_score}
 Risk Level: {risk_level}"""
-                
+
                 details_label = ctk.CTkLabel(
-                    frame,
+                    details_frame,
                     text=details,
                     font=ctk.CTkFont(size=12),
-                    justify="left"
+                    justify="left",
+                    text_color="white"
                 )
-                details_label.pack(pady=10, padx=20)
-                
+                details_label.pack(pady=15, padx=15, anchor="w")
+
+                # Footer with close button (always visible)
+                footer_frame = ctk.CTkFrame(main_frame, fg_color=self.colors["red_dark"])
+                footer_frame.pack(fill="x", padx=10, pady=(5, 15))
+
                 btn_close = ctk.CTkButton(
-                    frame,
+                    footer_frame,
                     text="Close",
                     command=alert.destroy,
                     fg_color=self.colors["navy"],
-                    hover_color=self.colors["dark_blue"]
+                    hover_color=self.colors["dark_blue"],
+                    width=120,
+                    height=35
                 )
-                btn_close.pack(pady=20)
+                btn_close.pack(pady=5)
             
             self.root.after(0, show_alert)
             self.root.after(0, self.refresh_process_list)

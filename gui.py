@@ -2930,7 +2930,10 @@ File Size: {file_info['file_size']} bytes"""
             # Check filter
             filter_match = True
             if filter_choice == "YARA Matches Only":
-                filter_match = proc.get('threat_detected', False) and proc.get('yara_rule')
+                yara_rule = proc.get('yara_rule')
+                filter_match = (proc.get('threat_detected', False) and
+                               yara_rule and
+                               yara_rule != 'No_YARA_Hit')
             elif filter_choice == "Benign Only":
                 filter_match = proc.get('whitelisted', False)
             elif filter_choice == "Not Scanned":
@@ -3122,23 +3125,37 @@ File Size: {file_info['file_size']} bytes"""
 
                         alert = ctk.CTkToplevel(self.root)
                         alert.title("⚠️ Threat Detected")
-                        alert.geometry("600x500")
+                        alert.geometry("700x650")
+                        alert.minsize(600, 500)
                         alert.attributes('-topmost', True)
 
-                        frame = ctk.CTkFrame(alert, fg_color=self.colors["red_dark"])
-                        frame.pack(fill="both", expand=True, padx=2, pady=2)
+                        # Main container frame
+                        main_frame = ctk.CTkFrame(alert, fg_color=self.colors["red_dark"])
+                        main_frame.pack(fill="both", expand=True, padx=2, pady=2)
+
+                        # Header section
+                        header_frame = ctk.CTkFrame(main_frame, fg_color=self.colors["red_dark"])
+                        header_frame.pack(fill="x", padx=10, pady=(15, 10))
 
                         title = ctk.CTkLabel(
-                            frame,
+                            header_frame,
                             text="⚠️ MALICIOUS PROCESS DETECTED",
                             font=ctk.CTkFont(size=18, weight="bold"),
                             text_color="white"
                         )
-                        title.pack(pady=20)
+                        title.pack()
+
+                        # Content section (scrollable)
+                        content_frame = ctk.CTkFrame(main_frame, fg_color=self.colors["red_dark"])
+                        content_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
                         # Get all matched rules
                         all_rules = result.get('all_rules', [rule])
                         rules_display = ', '.join(all_rules) if len(all_rules) > 1 else rule
+
+                        # Details section
+                        details_frame = ctk.CTkFrame(content_frame, fg_color="#1a1a1a", corner_radius=8)
+                        details_frame.pack(fill="x", padx=10, pady=10)
 
                         details = f"""PID: {pid}
 Name: {proc_name}
@@ -3149,25 +3166,34 @@ Threat Score: {threat_score}
 Risk Level: {risk_level}"""
 
                         details_label = ctk.CTkLabel(
-                            frame,
+                            details_frame,
                             text=details,
                             font=ctk.CTkFont(size=12),
-                            justify="left"
+                            justify="left",
+                            text_color="white"
                         )
-                        details_label.pack(pady=10, padx=20)
+                        details_label.pack(pady=15, padx=15, anchor="w")
 
-                        # Show all matched strings in a scrollable text widget
+                        # Matched strings section
                         if strings:
-                            strings_label = ctk.CTkLabel(
-                                frame,
+                            strings_header = ctk.CTkLabel(
+                                content_frame,
                                 text=f"Matched Strings ({len(strings)}):",
                                 font=ctk.CTkFont(size=12, weight="bold"),
                                 text_color="white"
                             )
-                            strings_label.pack(pady=(10, 5), padx=20, anchor="w")
+                            strings_header.pack(pady=(5, 5), padx=10, anchor="w")
 
-                            strings_frame = ctk.CTkScrollableFrame(frame, height=150, fg_color="#2b2b2b")
-                            strings_frame.pack(pady=5, padx=20, fill="both", expand=True)
+                            # Scrollable strings container with fixed height
+                            strings_container = ctk.CTkFrame(content_frame, fg_color="#1a1a1a", corner_radius=8)
+                            strings_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+                            strings_frame = ctk.CTkScrollableFrame(
+                                strings_container,
+                                fg_color="#2b2b2b",
+                                height=250
+                            )
+                            strings_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
                             # Display all strings
                             for i, s in enumerate(strings, 1):
@@ -3180,16 +3206,22 @@ Risk Level: {risk_level}"""
                                     anchor="w",
                                     justify="left"
                                 )
-                                string_label.pack(anchor="w", pady=2, padx=5)
+                                string_label.pack(anchor="w", pady=2, padx=5, fill="x")
+
+                        # Footer with close button (always visible)
+                        footer_frame = ctk.CTkFrame(main_frame, fg_color=self.colors["red_dark"])
+                        footer_frame.pack(fill="x", padx=10, pady=(5, 15))
 
                         btn_close = ctk.CTkButton(
-                            frame,
+                            footer_frame,
                             text="Close",
                             command=alert.destroy,
                             fg_color=self.colors["navy"],
-                            hover_color=self.colors["dark_blue"]
+                            hover_color=self.colors["dark_blue"],
+                            width=120,
+                            height=35
                         )
-                        btn_close.pack(pady=20)
+                        btn_close.pack(pady=5)
 
                     self.root.after(0, show_threat_alert)
                 else:
@@ -4174,23 +4206,37 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             def show_alert():
                 alert = ctk.CTkToplevel(self.root)
                 alert.title("⚠️ Threat Detected")
-                alert.geometry("600x500")
+                alert.geometry("700x650")
+                alert.minsize(600, 500)
                 alert.attributes('-topmost', True)
 
-                frame = ctk.CTkFrame(alert, fg_color=self.colors["red_dark"])
-                frame.pack(fill="both", expand=True, padx=2, pady=2)
+                # Main container frame
+                main_frame = ctk.CTkFrame(alert, fg_color=self.colors["red_dark"])
+                main_frame.pack(fill="both", expand=True, padx=2, pady=2)
+
+                # Header section
+                header_frame = ctk.CTkFrame(main_frame, fg_color=self.colors["red_dark"])
+                header_frame.pack(fill="x", padx=10, pady=(15, 10))
 
                 title = ctk.CTkLabel(
-                    frame,
+                    header_frame,
                     text="⚠️ MALICIOUS PROCESS DETECTED",
                     font=ctk.CTkFont(size=18, weight="bold"),
                     text_color="white"
                 )
-                title.pack(pady=20)
+                title.pack()
+
+                # Content section (scrollable)
+                content_frame = ctk.CTkFrame(main_frame, fg_color=self.colors["red_dark"])
+                content_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
                 # Get all matched rules
                 all_rules = scan_results.get('all_rules', [rule])
                 rules_display = ', '.join(all_rules) if len(all_rules) > 1 else rule
+
+                # Details section
+                details_frame = ctk.CTkFrame(content_frame, fg_color="#1a1a1a", corner_radius=8)
+                details_frame.pack(fill="x", padx=10, pady=10)
 
                 details = f"""PID: {proc_info['pid']}
 Name: {proc_info['name']}
@@ -4201,25 +4247,34 @@ Threat Score: {threat_score}
 Risk Level: {risk_level}"""
 
                 details_label = ctk.CTkLabel(
-                    frame,
+                    details_frame,
                     text=details,
                     font=ctk.CTkFont(size=12),
-                    justify="left"
+                    justify="left",
+                    text_color="white"
                 )
-                details_label.pack(pady=10, padx=20)
+                details_label.pack(pady=15, padx=15, anchor="w")
 
-                # Show all matched strings in a scrollable text widget
+                # Matched strings section
                 if strings:
-                    strings_label = ctk.CTkLabel(
-                        frame,
+                    strings_header = ctk.CTkLabel(
+                        content_frame,
                         text=f"Matched Strings ({len(strings)}):",
                         font=ctk.CTkFont(size=12, weight="bold"),
                         text_color="white"
                     )
-                    strings_label.pack(pady=(10, 5), padx=20, anchor="w")
+                    strings_header.pack(pady=(5, 5), padx=10, anchor="w")
 
-                    strings_frame = ctk.CTkScrollableFrame(frame, height=150, fg_color="#2b2b2b")
-                    strings_frame.pack(pady=5, padx=20, fill="both", expand=True)
+                    # Scrollable strings container with fixed height
+                    strings_container = ctk.CTkFrame(content_frame, fg_color="#1a1a1a", corner_radius=8)
+                    strings_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+                    strings_frame = ctk.CTkScrollableFrame(
+                        strings_container,
+                        fg_color="#2b2b2b",
+                        height=250
+                    )
+                    strings_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
                     # Display all strings
                     for i, s in enumerate(strings, 1):
@@ -4232,16 +4287,22 @@ Risk Level: {risk_level}"""
                             anchor="w",
                             justify="left"
                         )
-                        string_label.pack(anchor="w", pady=2, padx=5)
+                        string_label.pack(anchor="w", pady=2, padx=5, fill="x")
+
+                # Footer with close button (always visible)
+                footer_frame = ctk.CTkFrame(main_frame, fg_color=self.colors["red_dark"])
+                footer_frame.pack(fill="x", padx=10, pady=(5, 15))
 
                 btn_close = ctk.CTkButton(
-                    frame,
+                    footer_frame,
                     text="Close",
                     command=alert.destroy,
                     fg_color=self.colors["navy"],
-                    hover_color=self.colors["dark_blue"]
+                    hover_color=self.colors["dark_blue"],
+                    width=120,
+                    height=35
                 )
-                btn_close.pack(pady=20)
+                btn_close.pack(pady=5)
 
             self.root.after(0, show_alert)
     

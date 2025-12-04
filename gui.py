@@ -16,6 +16,7 @@ from analysis_modules.sysmon_parser import SysmonLogMonitor
 import tkinter as tk
 from tkinter import ttk
 import re
+from typography import Fonts
 
 class ForensicAnalysisGUI:
     def __init__(self):
@@ -91,8 +92,8 @@ class ForensicAnalysisGUI:
         header.pack(fill="x", side="top")
         header.pack_propagate(False)
         
-        title = ctk.CTkLabel(header, text="MAD - Malware Analysis Dashboard", 
-                            font=ctk.CTkFont(size=20, weight="bold"),
+        title = ctk.CTkLabel(header, text="MAD - Malware Analysis Dashboard",
+                            font=Fonts.header_subsection,
                             text_color="white")
         title.pack(side="left", padx=20, pady=15)
         
@@ -130,7 +131,7 @@ class ForensicAnalysisGUI:
         self.btn_new_case = ctk.CTkButton(
             nav_frame, text="New Case", 
             command=lambda: self.show_tab("new_case"),
-            height=45, font=ctk.CTkFont(size=14, weight="bold"),
+            height=45, font=Fonts.label_large,
             fg_color=self.colors["navy"],
             hover_color=self.colors["dark_blue"],
             corner_radius=8
@@ -140,7 +141,7 @@ class ForensicAnalysisGUI:
         self.btn_current_case = ctk.CTkButton(
             nav_frame, text="Current Case",
             command=lambda: self.show_tab("current_case"),
-            height=45, font=ctk.CTkFont(size=14, weight="bold"),
+            height=45, font=Fonts.label_large,
             fg_color="transparent", 
             hover_color=self.colors["navy"],
             border_width=2,
@@ -152,7 +153,7 @@ class ForensicAnalysisGUI:
         self.btn_analysis = ctk.CTkButton(
             nav_frame, text="Analysis",
             command=lambda: self.show_tab("analysis"),
-            height=45, font=ctk.CTkFont(size=14, weight="bold"),
+            height=45, font=Fonts.label_large,
             fg_color="transparent",
             hover_color=self.colors["navy"],
             border_width=2,
@@ -229,7 +230,7 @@ class ForensicAnalysisGUI:
         title = ctk.CTkLabel(
             title_frame,
             text="New Malware Case",
-            font=ctk.CTkFont(size=36, weight="bold"),
+            font=Fonts.header_main,
             text_color="white"
         )
         title.pack()
@@ -246,7 +247,7 @@ class ForensicAnalysisGUI:
         analyst_label = ctk.CTkLabel(
             form_container,
             text="Analyst Name",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=Fonts.label_large,
             text_color="white",
             anchor="w"
         )
@@ -257,7 +258,7 @@ class ForensicAnalysisGUI:
             width=400,
             height=40,
             placeholder_text="Enter your name",
-            font=ctk.CTkFont(size=14),
+            font=Fonts.body_large,
             fg_color=self.colors["navy"],
             border_color=self.colors["red"],
             border_width=2
@@ -268,7 +269,7 @@ class ForensicAnalysisGUI:
         report_label = ctk.CTkLabel(
             form_container,
             text="Report URL",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=Fonts.label_large,
             text_color="white",
             anchor="w"
         )
@@ -279,7 +280,7 @@ class ForensicAnalysisGUI:
             width=400,
             height=40,
             placeholder_text="Enter report URL",
-            font=ctk.CTkFont(size=14),
+            font=Fonts.body_large,
             fg_color=self.colors["navy"],
             border_color=self.colors["red"],
             border_width=2
@@ -293,7 +294,7 @@ class ForensicAnalysisGUI:
         method_label = ctk.CTkLabel(
             upload_method_frame,
             text="Select Upload Method:",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=Fonts.label_large,
             text_color="white"
         )
         method_label.pack(pady=(0, 10))
@@ -310,7 +311,7 @@ class ForensicAnalysisGUI:
             variable=self.upload_method,
             value="file",
             command=self.on_upload_method_change,
-            font=ctk.CTkFont(size=13),
+            font=Fonts.body_large,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"]
         )
@@ -322,7 +323,7 @@ class ForensicAnalysisGUI:
             variable=self.upload_method,
             value="url",
             command=self.on_upload_method_change,
-            font=ctk.CTkFont(size=13),
+            font=Fonts.body_large,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"]
         )
@@ -334,7 +335,7 @@ class ForensicAnalysisGUI:
         url_input_label = ctk.CTkLabel(
             self.url_input_frame,
             text="Enter URLs (one per line):",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=Fonts.body_bold,
             text_color="white",
             anchor="w"
         )
@@ -345,7 +346,7 @@ class ForensicAnalysisGUI:
             wrap="none",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=("Segoe UI", 11),
+            font=Fonts.text_input(),
             relief="flat",
             padx=10,
             pady=10,
@@ -361,7 +362,7 @@ class ForensicAnalysisGUI:
             command=self.handle_new_case_upload,
             height=50,
             width=400,
-            font=ctk.CTkFont(size=16, weight="bold"),
+            font=Fonts.title_medium,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"],
             corner_radius=8
@@ -373,7 +374,7 @@ class ForensicAnalysisGUI:
         self.new_case_status = ctk.CTkLabel(
             center_container,
             text="",
-            font=ctk.CTkFont(size=12),
+            font=Fonts.body,
             text_color="white"
         )
         self.new_case_status.pack(pady=10)
@@ -385,7 +386,7 @@ class ForensicAnalysisGUI:
         logo_shield = ctk.CTkLabel(
             parent_frame,
             text="🛡",
-            font=ctk.CTkFont(size=80),
+            font=Fonts.logo_emoji,
             text_color=self.colors["red"]
         )
         logo_shield.pack(side="left", padx=(0, 20))
@@ -396,7 +397,7 @@ class ForensicAnalysisGUI:
         logo_main = ctk.CTkLabel(
             logo_text_frame,
             text="M.A.D.",
-            font=ctk.CTkFont(size=72, weight="bold"),
+            font=Fonts.logo_main,
             text_color="white"
         )
         logo_main.pack(anchor="w")
@@ -404,7 +405,7 @@ class ForensicAnalysisGUI:
         logo_subtitle = ctk.CTkLabel(
             logo_text_frame,
             text="MALWARE ANALYSIS\nDASHBOARD",
-            font=ctk.CTkFont(size=20, weight="bold"),
+            font=Fonts.logo_subtitle,
             text_color="white",
             justify="left"
         )
@@ -420,7 +421,7 @@ class ForensicAnalysisGUI:
         header_frame.pack(fill="x", pady=10, padx=20)
         
         title = ctk.CTkLabel(header_frame, text="Current Case",
-                            font=ctk.CTkFont(size=24, weight="bold"),
+                            font=Fonts.header_section,
                             text_color="white")
         title.pack(side="left")
         
@@ -429,7 +430,7 @@ class ForensicAnalysisGUI:
                                              fg_color="#2D7A3E",
                                              width=100, height=30,
                                              text_color="white",
-                                             font=ctk.CTkFont(size=11, weight="bold"))
+                                             font=Fonts.label)
         self.case_status_label.pack(side="right", padx=10)
         
         # Scrollable frame for content
@@ -441,7 +442,7 @@ class ForensicAnalysisGUI:
         self.case_details_frame.pack(fill="x", pady=5)
         
         details_title = ctk.CTkLabel(self.case_details_frame, text="Case Details",
-                                    font=ctk.CTkFont(size=16, weight="bold"),
+                                    font=Fonts.title_medium,
                                     text_color="white")
         details_title.pack(pady=10, padx=15, anchor="w")
         
@@ -454,7 +455,7 @@ class ForensicAnalysisGUI:
         files_header.pack(fill="x", pady=(10, 5))
         
         files_title = ctk.CTkLabel(files_header, text="Uploaded Files",
-                                  font=ctk.CTkFont(size=16, weight="bold"),
+                                  font=Fonts.title_medium,
                                   text_color="white")
         files_title.pack(side="left", padx=15)
         
@@ -463,7 +464,7 @@ class ForensicAnalysisGUI:
                                      height=30, width=100,
                                      fg_color=self.colors["red"],
                                      hover_color=self.colors["red_dark"],
-                                     font=ctk.CTkFont(size=11, weight="bold"))
+                                     font=Fonts.label)
         btn_add_files.pack(side="right", padx=15)
         
         # Files list container
@@ -475,7 +476,7 @@ class ForensicAnalysisGUI:
         iocs_header.pack(fill="x", pady=(10, 5))
 
         iocs_title = ctk.CTkLabel(iocs_header, text="Indicators of Compromise (IOCs)",
-                                  font=ctk.CTkFont(size=16, weight="bold"),
+                                  font=Fonts.title_medium,
                                   text_color="white")
         iocs_title.pack(side="left", padx=15)
 
@@ -484,7 +485,7 @@ class ForensicAnalysisGUI:
                                     height=30, width=100,
                                     fg_color=self.colors["red"],
                                     hover_color=self.colors["red_dark"],
-                                    font=ctk.CTkFont(size=11, weight="bold"))
+                                    font=Fonts.label)
         btn_add_ioc.pack(side="right", padx=15)
 
         # IOCs container
@@ -500,7 +501,7 @@ class ForensicAnalysisGUI:
         self.iocs_urls_frame.pack(fill="x", pady=(0, 10))
 
         urls_label = ctk.CTkLabel(self.iocs_urls_frame, text="URLs:",
-                                  font=ctk.CTkFont(size=12, weight="bold"),
+                                  font=Fonts.body_bold,
                                   text_color="white", anchor="w")
         urls_label.pack(anchor="w", padx=10, pady=(10, 5))
 
@@ -512,7 +513,7 @@ class ForensicAnalysisGUI:
         self.iocs_ips_frame.pack(fill="x", pady=(0, 10))
 
         ips_label = ctk.CTkLabel(self.iocs_ips_frame, text="IP Addresses:",
-                                 font=ctk.CTkFont(size=12, weight="bold"),
+                                 font=Fonts.body_bold,
                                  text_color="white", anchor="w")
         ips_label.pack(anchor="w", padx=10, pady=(10, 5))
 
@@ -524,7 +525,7 @@ class ForensicAnalysisGUI:
         self.iocs_domains_frame.pack(fill="x", pady=(0, 10))
 
         domains_label = ctk.CTkLabel(self.iocs_domains_frame, text="Domains:",
-                                     font=ctk.CTkFont(size=12, weight="bold"),
+                                     font=Fonts.body_bold,
                                      text_color="white", anchor="w")
         domains_label.pack(anchor="w", padx=10, pady=(10, 5))
 
@@ -537,7 +538,7 @@ class ForensicAnalysisGUI:
         notes_header.pack(fill="x", pady=(10, 5))
         
         notes_title = ctk.CTkLabel(notes_header, text="Case Notes",
-                                  font=ctk.CTkFont(size=16, weight="bold"),
+                                  font=Fonts.title_medium,
                                   text_color="white")
         notes_title.pack(side="left", padx=15)
         
@@ -547,7 +548,7 @@ class ForensicAnalysisGUI:
                                       height=30, width=100,
                                       fg_color=self.colors["red"],
                                       hover_color=self.colors["red_dark"],
-                                      font=ctk.CTkFont(size=11, weight="bold"))
+                                      font=Fonts.label)
         btn_save_notes.pack(side="right", padx=15)
         
         # Notes text area
@@ -559,7 +560,7 @@ class ForensicAnalysisGUI:
             wrap="word",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=("Segoe UI", 11),
+            font=Fonts.text_input(),
             relief="flat",
             padx=15,
             pady=15,
@@ -575,7 +576,7 @@ class ForensicAnalysisGUI:
         frame = ctk.CTkFrame(self.content_area, fg_color=self.colors["dark_blue"])
         
         title = ctk.CTkLabel(frame, text="Analysis",
-                            font=ctk.CTkFont(size=28, weight="bold"),
+                            font=Fonts.header_main,
                             text_color="white")
         title.pack(pady=20, padx=20, anchor="w")
         
@@ -589,7 +590,7 @@ class ForensicAnalysisGUI:
             height=35, width=150,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"],
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=Fonts.body_bold
         )
         self.btn_processes.pack(side="left", padx=5)
         
@@ -601,7 +602,7 @@ class ForensicAnalysisGUI:
             hover_color=self.colors["navy"],
             border_width=2,
             border_color=self.colors["red"],
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=Fonts.body_bold
         )
         self.btn_network.pack(side="left", padx=5)
 
@@ -613,7 +614,7 @@ class ForensicAnalysisGUI:
             hover_color=self.colors["navy"],
             border_width=2,
             border_color=self.colors["red"],
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=Fonts.body_bold
         )
         self.btn_live_events.pack(side="left", padx=5)
 
@@ -639,7 +640,7 @@ class ForensicAnalysisGUI:
         header.pack(fill="x", padx=20, pady=10)
         
         title = ctk.CTkLabel(header, text="Process Analysis",
-                            font=ctk.CTkFont(size=18, weight="bold"),
+                            font=Fonts.title_large,
                             text_color="white")
         title.pack(side="left")
         
@@ -678,7 +679,7 @@ class ForensicAnalysisGUI:
         search_frame.pack(fill="x", padx=20, pady=(0, 10))
 
         search_label = ctk.CTkLabel(search_frame, text="🔍 Search:",
-                                   font=ctk.CTkFont(size=12),
+                                   font=Fonts.body,
                                    text_color="white")
         search_label.pack(side="left", padx=(0, 10))
 
@@ -706,7 +707,7 @@ class ForensicAnalysisGUI:
 
         # Filter dropdown
         filter_label = ctk.CTkLabel(search_frame, text="Filter:",
-                                    font=ctk.CTkFont(size=12),
+                                    font=Fonts.body,
                                     text_color="white")
         filter_label.pack(side="left", padx=(20, 10))
 
@@ -840,7 +841,7 @@ class ForensicAnalysisGUI:
         header.pack(fill="x", padx=20, pady=10)
         
         title = ctk.CTkLabel(header, text="Network Analysis",
-                            font=ctk.CTkFont(size=18, weight="bold"),
+                            font=Fonts.title_large,
                             text_color="white")
         title.pack(side="left")
         
@@ -871,7 +872,7 @@ class ForensicAnalysisGUI:
         self.network_stats_label = ctk.CTkLabel(
             stats_frame,
             text="Network Statistics: Not monitoring",
-            font=ctk.CTkFont(size=11),
+            font=Fonts.helper,
             justify="left"
         )
         self.network_stats_label.pack(padx=15, pady=10, anchor="w")
@@ -955,13 +956,13 @@ class ForensicAnalysisGUI:
         header.pack(fill="x", padx=20, pady=10)
 
         title = ctk.CTkLabel(header, text="Live System Events",
-                            font=ctk.CTkFont(size=18, weight="bold"),
+                            font=Fonts.title_large,
                             text_color="white")
         title.pack(side="left")
 
         subtitle = ctk.CTkLabel(header,
                                text="Real-time monitoring: File • Registry • Network • Process • DNS",
-                               font=ctk.CTkFont(size=11), text_color="gray60")
+                               font=Fonts.helper, text_color="gray60")
         subtitle.pack(side="left", padx=20)
 
         # Main content area
@@ -985,7 +986,7 @@ class ForensicAnalysisGUI:
             command=None,  # Will be set later
             height=40,
             width=180,
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=Fonts.label_large,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"]
         )
@@ -995,7 +996,7 @@ class ForensicAnalysisGUI:
         status_label = ctk.CTkLabel(
             row1,
             text="● Monitoring: Stopped",
-            font=ctk.CTkFont(size=13),
+            font=Fonts.body_large,
             text_color="gray50"
         )
         status_label.pack(side="left", padx=10)
@@ -1004,7 +1005,7 @@ class ForensicAnalysisGUI:
         sysmon_status = ctk.CTkLabel(
             row1,
             text="",
-            font=ctk.CTkFont(size=11),
+            font=Fonts.helper,
             text_color="gray60"
         )
         sysmon_status.pack(side="left", padx=10)
@@ -1041,7 +1042,7 @@ class ForensicAnalysisGUI:
         stats_label = ctk.CTkLabel(
             row2,
             text="Total: 0 | File: 0 | Registry: 0 | Network: 0 | Process: 0 | DNS: 0",
-            font=ctk.CTkFont(size=12),
+            font=Fonts.body,
             text_color="gray60"
         )
         stats_label.pack(side="left")
@@ -1057,7 +1058,7 @@ class ForensicAnalysisGUI:
         filter_label1 = ctk.CTkLabel(
             filter_row1,
             text="Event Type:",
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=Fonts.body_bold
         )
         filter_label1.pack(side="left", padx=(0, 10))
 
@@ -1087,7 +1088,7 @@ class ForensicAnalysisGUI:
             text="🚨 Suspicious Only",
             variable=suspicious_var,
             command=None,  # Will be set later
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=Fonts.body_bold,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"]
         )
@@ -1101,7 +1102,7 @@ class ForensicAnalysisGUI:
         pid_filter_label = ctk.CTkLabel(
             filter_row2,
             text="PID Filter:",
-            font=ctk.CTkFont(size=11)
+            font=Fonts.helper
         )
         pid_filter_label.pack(side="left", padx=(0, 5))
 
@@ -1119,7 +1120,7 @@ class ForensicAnalysisGUI:
             filter_row2,
             text="Include children",
             variable=include_children_var,
-            font=ctk.CTkFont(size=11),
+            font=Fonts.helper,
             width=120
         )
         include_children_checkbox.pack(side="left", padx=5)
@@ -1128,7 +1129,7 @@ class ForensicAnalysisGUI:
         regex_filter_label = ctk.CTkLabel(
             filter_row2,
             text="Path Regex:",
-            font=ctk.CTkFont(size=11)
+            font=Fonts.helper
         )
         regex_filter_label.pack(side="left", padx=(20, 5))
 
@@ -1167,7 +1168,7 @@ class ForensicAnalysisGUI:
         process_info_label = ctk.CTkLabel(
             process_info_panel,
             text="",
-            font=ctk.CTkFont(size=11),
+            font=Fonts.helper,
             text_color="white",
             anchor="w",
             justify="left"
@@ -2135,14 +2136,14 @@ class ForensicAnalysisGUI:
         title = ctk.CTkLabel(
             container,
             text="Scanning Files",
-            font=ctk.CTkFont(size=18, weight="bold")
+            font=Fonts.title_large
         )
         title.pack(pady=(0, 5))
         
         subtitle = ctk.CTkLabel(
             container,
             text="YARA & Threat Intelligence Analysis",
-            font=ctk.CTkFont(size=12),
+            font=Fonts.body,
             text_color="gray60"
         )
         subtitle.pack(pady=(0, 20))
@@ -2156,7 +2157,7 @@ class ForensicAnalysisGUI:
         self.progress_label = ctk.CTkLabel(
             container,
             text=f"Processing 0 of {total_files} files...",
-            font=ctk.CTkFont(size=13, weight="bold")
+            font=Fonts.body_large_bold
         )
         self.progress_label.pack(pady=10)
         
@@ -2164,7 +2165,7 @@ class ForensicAnalysisGUI:
         self.current_file_label = ctk.CTkLabel(
             container,
             text="Initializing...",
-            font=ctk.CTkFont(size=11),
+            font=Fonts.helper,
             text_color="gray60"
         )
         self.current_file_label.pack(pady=5)
@@ -2261,12 +2262,12 @@ class ForensicAnalysisGUI:
 
         # Title
         title_label = ctk.CTkLabel(content, text="Add Indicator of Compromise",
-                                   font=ctk.CTkFont(size=16, weight="bold"))
+                                   font=Fonts.title_medium)
         title_label.pack(pady=(0, 15))
 
         # IOC Type selection
         type_label = ctk.CTkLabel(content, text="IOC Type:",
-                                  font=ctk.CTkFont(size=12, weight="bold"),
+                                  font=Fonts.body_bold,
                                   anchor="w")
         type_label.pack(anchor="w", pady=(0, 5))
 
@@ -2283,7 +2284,7 @@ class ForensicAnalysisGUI:
 
         # IOC Value input
         value_label = ctk.CTkLabel(content, text="IOC Value:",
-                                   font=ctk.CTkFont(size=12, weight="bold"),
+                                   font=Fonts.body_bold,
                                    anchor="w")
         value_label.pack(anchor="w", pady=(0, 5))
 
@@ -2420,11 +2421,11 @@ class ForensicAnalysisGUI:
             detail_frame.grid(row=row, column=col, padx=10, pady=5, sticky="w")
             
             lbl = ctk.CTkLabel(detail_frame, text=label, 
-                              text_color="gray60", font=ctk.CTkFont(size=11))
+                              text_color="gray60", font=Fonts.helper)
             lbl.pack(anchor="w")
             
             val = ctk.CTkLabel(detail_frame, text=value,
-                              font=ctk.CTkFont(size=12, weight="bold"),
+                              font=Fonts.body_bold,
                               text_color="white")
             val.pack(anchor="w")
         
@@ -2478,7 +2479,7 @@ class ForensicAnalysisGUI:
         
         name_label = ctk.CTkLabel(
             left_frame, text=file_info["filename"],
-            font=ctk.CTkFont(size=16, weight="bold"),
+            font=Fonts.title_medium,
             text_color="white",
             cursor="hand2"
         )
@@ -2509,7 +2510,7 @@ class ForensicAnalysisGUI:
             left_frame,
             text=info_line,
             text_color=label_color,
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=Fonts.body_bold,
             cursor="hand2"
         )
         yara_thq_label.pack(anchor="w", pady=(3, 0))
@@ -2519,7 +2520,7 @@ class ForensicAnalysisGUI:
         info_text = f"{size_kb:.2f} KB | {datetime.fromisoformat(file_info['timestamp']).strftime('%Y-%m-%d %H:%M:%S')}"
         info_label = ctk.CTkLabel(
             left_frame, text=info_text,
-            text_color="gray60", font=ctk.CTkFont(size=10),
+            text_color="gray60", font=Fonts.helper,
             cursor="hand2"
         )
         info_label.pack(anchor="w", pady=(2, 0))
@@ -2549,7 +2550,7 @@ File Size: {file_info['file_size']} bytes"""
             text="📋 Copy Details",
             width=120,
             height=28,
-            font=ctk.CTkFont(size=11),
+            font=Fonts.helper,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"],
             cursor="hand2"
@@ -2564,7 +2565,7 @@ File Size: {file_info['file_size']} bytes"""
         expand_indicator = ctk.CTkLabel(
             right_frame,
             text="▼",
-            font=ctk.CTkFont(size=14),
+            font=Fonts.body_large,
             text_color="gray60",
             cursor="hand2"
         )
@@ -2608,7 +2609,7 @@ File Size: {file_info['file_size']} bytes"""
             wrap="none",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=("Courier", 10),
+            font=Fonts.monospace(10),
             height=12,
             relief="flat",
             padx=10,
@@ -3140,7 +3141,7 @@ File Size: {file_info['file_size']} bytes"""
                         title = ctk.CTkLabel(
                             header_frame,
                             text="⚠️ MALICIOUS PROCESS DETECTED",
-                            font=ctk.CTkFont(size=18, weight="bold"),
+                            font=Fonts.title_large,
                             text_color="white"
                         )
                         title.pack()
@@ -3168,7 +3169,7 @@ Risk Level: {risk_level}"""
                         details_label = ctk.CTkLabel(
                             details_frame,
                             text=details,
-                            font=ctk.CTkFont(size=12),
+                            font=Fonts.body,
                             justify="left",
                             text_color="white"
                         )
@@ -3179,7 +3180,7 @@ Risk Level: {risk_level}"""
                             strings_header = ctk.CTkLabel(
                                 content_frame,
                                 text=f"Matched Strings ({len(strings)}):",
-                                font=ctk.CTkFont(size=12, weight="bold"),
+                                font=Fonts.body_bold,
                                 text_color="white"
                             )
                             strings_header.pack(pady=(5, 5), padx=10, anchor="w")
@@ -3201,7 +3202,7 @@ Risk Level: {risk_level}"""
                                 string_label = ctk.CTkLabel(
                                     strings_frame,
                                     text=f"{i}. {s_display}",
-                                    font=ctk.CTkFont(size=10),
+                                    font=Fonts.helper,
                                     text_color="white",
                                     anchor="w",
                                     justify="left"
@@ -3256,7 +3257,7 @@ Risk Level: {risk_level}"""
         title_label = ctk.CTkLabel(
             frame,
             text="Scanning All Processes",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            font=Fonts.title_medium,
             text_color="white"
         )
         title_label.pack(pady=10)
@@ -3264,7 +3265,7 @@ Risk Level: {risk_level}"""
         progress_label = ctk.CTkLabel(
             frame,
             text=f"Scanning process 0 of {total_processes}",
-            font=ctk.CTkFont(size=12),
+            font=Fonts.body,
             text_color="white"
         )
         progress_label.pack(pady=10)
@@ -3276,7 +3277,7 @@ Risk Level: {risk_level}"""
         stats_label = ctk.CTkLabel(
             frame,
             text="Threats found: 0 | Benign: 0 | Errors: 0",
-            font=ctk.CTkFont(size=11),
+            font=Fonts.helper,
             text_color="white"
         )
         stats_label.pack(pady=10)
@@ -3394,7 +3395,7 @@ Errors: {scan_stats['errors']}"""
         title = ctk.CTkLabel(
             header,
             text=f"🔍 {name} (PID {pid})",
-            font=ctk.CTkFont(size=20, weight="bold")
+            font=Fonts.logo_subtitle
         )
         title.pack(side="left", padx=20, pady=15)
         
@@ -3504,7 +3505,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             wrap="word",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=("Courier", 11),
+            font=Fonts.monospace(11),
             relief="flat",
             padx=20,
             pady=20
@@ -3528,7 +3529,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         search_label = ctk.CTkLabel(
             search_row,
             text="🔍 Search:",
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=Fonts.body_bold
         )
         search_label.pack(side="left", padx=(10, 5))
 
@@ -3537,7 +3538,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             width=300,
             height=35,
             placeholder_text="Enter search term...",
-            font=ctk.CTkFont(size=12)
+            font=Fonts.body
         )
         search_entry.pack(side="left", padx=5)
 
@@ -3545,7 +3546,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         status_label = ctk.CTkLabel(
             search_row,
             text="Extracting strings...",
-            font=ctk.CTkFont(size=11),
+            font=Fonts.helper,
             text_color="gray60"
         )
         status_label.pack(side="left", padx=20)
@@ -3558,14 +3559,14 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         length_label = ctk.CTkLabel(
             filter_row,
             text="📏 Length:",
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=Fonts.body_bold
         )
         length_label.pack(side="left", padx=(10, 5))
 
         min_label = ctk.CTkLabel(
             filter_row,
             text="Min:",
-            font=ctk.CTkFont(size=11)
+            font=Fonts.helper
         )
         min_label.pack(side="left", padx=(5, 2))
 
@@ -3574,7 +3575,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             width=60,
             height=30,
             placeholder_text="4",
-            font=ctk.CTkFont(size=11)
+            font=Fonts.helper
         )
         min_length_entry.insert(0, "4")
         min_length_entry.pack(side="left", padx=2)
@@ -3582,7 +3583,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         max_label = ctk.CTkLabel(
             filter_row,
             text="Max:",
-            font=ctk.CTkFont(size=11)
+            font=Fonts.helper
         )
         max_label.pack(side="left", padx=(10, 2))
 
@@ -3591,7 +3592,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             width=60,
             height=30,
             placeholder_text="∞",
-            font=ctk.CTkFont(size=11)
+            font=Fonts.helper
         )
         max_length_entry.pack(side="left", padx=2)
 
@@ -3601,7 +3602,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             filter_row,
             text="Quality Filter",
             variable=quality_filter_var,
-            font=ctk.CTkFont(size=11),
+            font=Fonts.helper,
             checkbox_width=20,
             checkbox_height=20
         )
@@ -3616,7 +3617,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             width=140,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"],
-            font=ctk.CTkFont(size=11, weight="bold")
+            font=Fonts.label
         )
         refresh_btn.pack(side="left", padx=15)
         
@@ -3635,7 +3636,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             wrap="none",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=("Courier", 10),
+            font=Fonts.monospace(10),
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set
         )
@@ -3833,7 +3834,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         stats_label = ctk.CTkLabel(
             controls_frame,
             text="Total: 0 | File: 0 | Network: 0 | Thread: 0 | Process: 0",
-            font=ctk.CTkFont(size=11),
+            font=Fonts.helper,
             text_color="gray60"
         )
         stats_label.pack(side="left", padx=20)
@@ -3872,7 +3873,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         filter_label = ctk.CTkLabel(
             filter_frame,
             text="Filter:",
-            font=ctk.CTkFont(size=12, weight="bold")
+            font=Fonts.body_bold
         )
         filter_label.pack(side="left", padx=10)
 
@@ -4221,7 +4222,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 title = ctk.CTkLabel(
                     header_frame,
                     text="⚠️ MALICIOUS PROCESS DETECTED",
-                    font=ctk.CTkFont(size=18, weight="bold"),
+                    font=Fonts.title_large,
                     text_color="white"
                 )
                 title.pack()
@@ -4249,7 +4250,7 @@ Risk Level: {risk_level}"""
                 details_label = ctk.CTkLabel(
                     details_frame,
                     text=details,
-                    font=ctk.CTkFont(size=12),
+                    font=Fonts.body,
                     justify="left",
                     text_color="white"
                 )
@@ -4260,7 +4261,7 @@ Risk Level: {risk_level}"""
                     strings_header = ctk.CTkLabel(
                         content_frame,
                         text=f"Matched Strings ({len(strings)}):",
-                        font=ctk.CTkFont(size=12, weight="bold"),
+                        font=Fonts.body_bold,
                         text_color="white"
                     )
                     strings_header.pack(pady=(5, 5), padx=10, anchor="w")
@@ -4282,7 +4283,7 @@ Risk Level: {risk_level}"""
                         string_label = ctk.CTkLabel(
                             strings_frame,
                             text=f"{i}. {s_display}",
-                            font=ctk.CTkFont(size=10),
+                            font=Fonts.helper,
                             text_color="white",
                             anchor="w",
                             justify="left"

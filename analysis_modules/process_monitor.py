@@ -386,56 +386,64 @@ class ProcessMonitor:
             matches = self.yara_rules.match(pid=pid)
 
             if matches:
-                m = matches[0]
-                results["rule"] = m.rule
+                # Store ALL matched rules, not just the first one
+                all_rules = [m.rule for m in matches]
+                results["rule"] = all_rules[0]  # Primary rule for backward compatibility
+                results["all_rules"] = all_rules  # All matched rules
                 results["matches_found"] = True
 
-                # Extract matched strings with enhanced details
+                # Extract matched strings from ALL matches
                 matched_strings = []
                 matched_strings_set = set()
 
-                for string_match in m.strings:
-                    for instance in string_match.instances:
-                        try:
-                            # Decode the matched data
-                            decoded = instance.matched_data.decode('utf-8', errors='ignore')
-
-                            # Store both the string and its metadata
-                            if decoded not in matched_strings_set:
-                                matched_strings_set.add(decoded)
-                                matched_strings.append({
-                                    'string': decoded,
-                                    'identifier': string_match.identifier,
-                                    'offset': hex(instance.offset),
-                                    'length': len(instance.matched_data)
-                                })
-                        except:
-                            # Try other encodings if UTF-8 fails
+                for m in matches:
+                    for string_match in m.strings:
+                        for instance in string_match.instances:
                             try:
-                                decoded = instance.matched_data.decode('latin-1', errors='ignore')
-                                if decoded and decoded not in matched_strings_set:
+                                # Decode the matched data
+                                decoded = instance.matched_data.decode('utf-8', errors='ignore')
+
+                                # Store both the string and its metadata
+                                if decoded not in matched_strings_set:
                                     matched_strings_set.add(decoded)
                                     matched_strings.append({
                                         'string': decoded,
                                         'identifier': string_match.identifier,
                                         'offset': hex(instance.offset),
-                                        'length': len(instance.matched_data)
+                                        'length': len(instance.matched_data),
+                                        'rule': m.rule
                                     })
                             except:
-                                continue
+                                # Try other encodings if UTF-8 fails
+                                try:
+                                    decoded = instance.matched_data.decode('latin-1', errors='ignore')
+                                    if decoded and decoded not in matched_strings_set:
+                                        matched_strings_set.add(decoded)
+                                        matched_strings.append({
+                                            'string': decoded,
+                                            'identifier': string_match.identifier,
+                                            'offset': hex(instance.offset),
+                                            'length': len(instance.matched_data),
+                                            'rule': m.rule
+                                        })
+                                except:
+                                    continue
 
                 # Store matched strings with metadata
                 results["matched_strings"] = matched_strings
 
                 # Also store simple string list for backward compatibility
-                results["strings"] = [s['string'] for s in matched_strings][:20]
+                results["strings"] = [s['string'] for s in matched_strings]
 
                 # Enhanced output
-                print(f"[YARA] Memory scan matched rule: {m.rule} for PID {pid}")
+                if len(all_rules) > 1:
+                    print(f"[YARA] Memory scan matched {len(all_rules)} rules for PID {pid}: {', '.join(all_rules)}")
+                else:
+                    print(f"[YARA] Memory scan matched rule: {all_rules[0]} for PID {pid}")
                 if matched_strings:
                     print(f"[YARA] Matched strings ({len(matched_strings)} total):")
                     for i, match_info in enumerate(matched_strings[:5], 1):  # Show first 5
-                        print(f"  {i}. [{match_info['identifier']}] '{match_info['string']}' at {match_info['offset']}")
+                        print(f"  {i}. [{match_info['identifier']}] '{match_info['string']}' at {match_info['offset']} (rule: {match_info['rule']})")
                     if len(matched_strings) > 5:
                         print(f"  ... and {len(matched_strings) - 5} more")
 
@@ -469,37 +477,44 @@ class ProcessMonitor:
                 matches = self.yara_rules.match(filepath=temp_path)
 
                 if matches:
-                    m = matches[0]
-                    results["rule"] = m.rule
+                    # Store ALL matched rules, not just the first one
+                    all_rules = [m.rule for m in matches]
+                    results["rule"] = all_rules[0]  # Primary rule for backward compatibility
+                    results["all_rules"] = all_rules  # All matched rules
                     results["matches_found"] = True
 
-                    # Get matched strings from file with enhanced details
+                    # Get matched strings from ALL matches with enhanced details
                     matched_strings = []
                     matched_strings_set = set()
 
-                    for string_match in m.strings:
-                        for instance in string_match.instances:
-                            try:
-                                decoded = instance.matched_data.decode('utf-8', errors='ignore')
-                                if decoded not in matched_strings_set:
-                                    matched_strings_set.add(decoded)
-                                    matched_strings.append({
-                                        'string': decoded,
-                                        'identifier': string_match.identifier,
-                                        'length': len(instance.matched_data)
-                                    })
-                            except:
-                                continue
+                    for m in matches:
+                        for string_match in m.strings:
+                            for instance in string_match.instances:
+                                try:
+                                    decoded = instance.matched_data.decode('utf-8', errors='ignore')
+                                    if decoded not in matched_strings_set:
+                                        matched_strings_set.add(decoded)
+                                        matched_strings.append({
+                                            'string': decoded,
+                                            'identifier': string_match.identifier,
+                                            'length': len(instance.matched_data),
+                                            'rule': m.rule
+                                        })
+                                except:
+                                    continue
 
                     # Store matched strings with metadata
                     results["matched_strings"] = matched_strings
-                    results["strings"] = [s['string'] for s in matched_strings][:20]
+                    results["strings"] = [s['string'] for s in matched_strings]
 
-                    print(f"[YARA] Fallback scan matched rule: {m.rule} for PID {pid}")
+                    if len(all_rules) > 1:
+                        print(f"[YARA] Fallback scan matched {len(all_rules)} rules for PID {pid}: {', '.join(all_rules)}")
+                    else:
+                        print(f"[YARA] Fallback scan matched rule: {all_rules[0]} for PID {pid}")
                     if matched_strings:
                         print(f"[YARA] Matched strings ({len(matched_strings)} total):")
                         for i, match_info in enumerate(matched_strings[:5], 1):
-                            print(f"  {i}. [{match_info['identifier']}] '{match_info['string']}'")
+                            print(f"  {i}. [{match_info['identifier']}] '{match_info['string']}' (rule: {match_info['rule']})")
 
             # Clean up temp file
             try:

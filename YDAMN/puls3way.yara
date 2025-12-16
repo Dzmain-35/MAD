@@ -3,7 +3,7 @@ rule Mal_Pulseway
 meta:
 	description = "Identifies Pulseway RAT abused malware"
 strings: 
-  $str1 = "Pulseway Client"
+  	$str1 = "Pulseway Client"
 	$str2 = "PCMonitorSrv"
 	$domain1 = "https://github.com/pulseway/LibreHardwareMonitor"
 	$domain3 = "www.pulseway.com"

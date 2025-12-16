@@ -425,29 +425,32 @@ class CaseManager:
                     # Extract matched strings with their details
                     matched_strings = []
                     for string_match in match.strings:
-                        # string_match is a tuple: (offset, identifier, data)
-                        offset = string_match[0]
-                        identifier = string_match[1]
-                        data = string_match[2]
+                        # string_match is a yara.StringMatch object with attributes
+                        identifier = string_match.identifier
 
-                        # Convert bytes to string for display, handle binary data
-                        try:
-                            if isinstance(data, bytes):
-                                # Try to decode as UTF-8, fallback to repr for binary
-                                try:
-                                    data_str = data.decode('utf-8', errors='ignore')
-                                except:
-                                    data_str = repr(data)
-                            else:
-                                data_str = str(data)
-                        except:
-                            data_str = repr(data)
+                        # Each StringMatch can have multiple instances (locations where it matched)
+                        for instance in string_match.instances:
+                            offset = instance.offset
+                            data = instance.matched_data
 
-                        matched_strings.append({
-                            "offset": offset,
-                            "identifier": identifier,
-                            "data": data_str
-                        })
+                            # Convert bytes to string for display, handle binary data
+                            try:
+                                if isinstance(data, bytes):
+                                    # Try to decode as UTF-8, fallback to repr for binary
+                                    try:
+                                        data_str = data.decode('utf-8', errors='ignore')
+                                    except:
+                                        data_str = repr(data)
+                                else:
+                                    data_str = str(data)
+                            except:
+                                data_str = repr(data)
+
+                            matched_strings.append({
+                                "offset": offset,
+                                "identifier": identifier,
+                                "data": data_str
+                            })
 
                     match_details.append({
                         "rule": match.rule,

@@ -450,51 +450,129 @@ class ForensicAnalysisGUI:
                                            fg_color="transparent")
         self.case_info_frame.pack(fill="x", padx=15, pady=(0, 10))
         
-        # Files section header
-        files_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="transparent")
+        # Files section header - Clickable
+        files_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
         files_header.pack(fill="x", pady=(10, 5))
-        
-        files_title = ctk.CTkLabel(files_header, text="Uploaded Files",
+
+        files_header_inner = ctk.CTkFrame(files_header, fg_color="transparent", cursor="hand2")
+        files_header_inner.pack(fill="x", padx=15, pady=10)
+
+        # Expand indicator for files
+        self.files_expand_indicator = ctk.CTkLabel(files_header_inner, text="▼",
+                                                   font=Fonts.body_large,
+                                                   text_color="gray60",
+                                                   cursor="hand2")
+        self.files_expand_indicator.pack(side="left", padx=(0, 10))
+
+        files_title = ctk.CTkLabel(files_header_inner, text="Uploaded Files",
                                   font=Fonts.title_medium,
-                                  text_color="white")
-        files_title.pack(side="left", padx=15)
-        
-        btn_add_files = ctk.CTkButton(files_header, text="➕ Add Files",
+                                  text_color="white",
+                                  cursor="hand2")
+        files_title.pack(side="left")
+
+        btn_add_files = ctk.CTkButton(files_header_inner, text="➕ Add Files",
                                      command=self.handle_add_files,
                                      height=30, width=100,
                                      fg_color=self.colors["red"],
                                      hover_color=self.colors["red_dark"],
                                      font=Fonts.label)
-        btn_add_files.pack(side="right", padx=15)
-        
-        # Files list container
+        btn_add_files.pack(side="right")
+
+        # Files list container (collapsible)
         self.files_list_frame = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="transparent")
         self.files_list_frame.pack(fill="x", pady=(0, 10))
 
-        # IOCs section
-        iocs_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="transparent")
+        # Track visibility state
+        self.files_section_visible = [True]
+
+        # Toggle function for files section
+        def toggle_files_section(event=None):
+            # Prevent toggle when clicking the Add Files button
+            if event and hasattr(event.widget, 'cget'):
+                try:
+                    if event.widget.cget('text') == "➕ Add Files":
+                        return
+                except:
+                    pass
+
+            if self.files_section_visible[0]:
+                self.files_list_frame.pack_forget()
+                self.files_expand_indicator.configure(text="▶")
+                self.files_section_visible[0] = False
+            else:
+                self.files_list_frame.pack(fill="x", pady=(0, 10))
+                self.files_expand_indicator.configure(text="▼")
+                self.files_section_visible[0] = True
+
+        # Bind click events
+        files_header.bind("<Button-1>", toggle_files_section)
+        files_header_inner.bind("<Button-1>", toggle_files_section)
+        files_title.bind("<Button-1>", toggle_files_section)
+        self.files_expand_indicator.bind("<Button-1>", toggle_files_section)
+
+        # IOCs section header - Clickable
+        iocs_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
         iocs_header.pack(fill="x", pady=(10, 5))
 
-        iocs_title = ctk.CTkLabel(iocs_header, text="Indicators of Compromise (IOCs)",
-                                  font=Fonts.title_medium,
-                                  text_color="white")
-        iocs_title.pack(side="left", padx=15)
+        iocs_header_inner = ctk.CTkFrame(iocs_header, fg_color="transparent", cursor="hand2")
+        iocs_header_inner.pack(fill="x", padx=15, pady=10)
 
-        btn_add_ioc = ctk.CTkButton(iocs_header, text="➕ Add IOC",
+        # Expand indicator for IOCs
+        self.iocs_expand_indicator = ctk.CTkLabel(iocs_header_inner, text="▼",
+                                                  font=Fonts.body_large,
+                                                  text_color="gray60",
+                                                  cursor="hand2")
+        self.iocs_expand_indicator.pack(side="left", padx=(0, 10))
+
+        iocs_title = ctk.CTkLabel(iocs_header_inner, text="Indicators of Compromise (IOCs)",
+                                  font=Fonts.title_medium,
+                                  text_color="white",
+                                  cursor="hand2")
+        iocs_title.pack(side="left")
+
+        btn_add_ioc = ctk.CTkButton(iocs_header_inner, text="➕ Add IOC",
                                     command=self.handle_add_ioc,
                                     height=30, width=100,
                                     fg_color=self.colors["red"],
                                     hover_color=self.colors["red_dark"],
                                     font=Fonts.label)
-        btn_add_ioc.pack(side="right", padx=15)
+        btn_add_ioc.pack(side="right")
 
-        # IOCs container
+        # IOCs container (collapsible)
         iocs_container = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20")
         iocs_container.pack(fill="x", pady=(0, 10))
 
         # IOCs content frame
         self.iocs_content_frame = ctk.CTkFrame(iocs_container, fg_color="transparent")
         self.iocs_content_frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+        # Track visibility state
+        self.iocs_section_visible = [True]
+
+        # Toggle function for IOCs section
+        def toggle_iocs_section(event=None):
+            # Prevent toggle when clicking the Add IOC button
+            if event and hasattr(event.widget, 'cget'):
+                try:
+                    if event.widget.cget('text') == "➕ Add IOC":
+                        return
+                except:
+                    pass
+
+            if self.iocs_section_visible[0]:
+                iocs_container.pack_forget()
+                self.iocs_expand_indicator.configure(text="▶")
+                self.iocs_section_visible[0] = False
+            else:
+                iocs_container.pack(fill="x", pady=(0, 10))
+                self.iocs_expand_indicator.configure(text="▼")
+                self.iocs_section_visible[0] = True
+
+        # Bind click events
+        iocs_header.bind("<Button-1>", toggle_iocs_section)
+        iocs_header_inner.bind("<Button-1>", toggle_iocs_section)
+        iocs_title.bind("<Button-1>", toggle_iocs_section)
+        self.iocs_expand_indicator.bind("<Button-1>", toggle_iocs_section)
 
         # IOCs lists
         self.iocs_urls_frame = ctk.CTkFrame(self.iocs_content_frame, fg_color="#1a1a1a", corner_radius=5)
@@ -533,27 +611,66 @@ class ForensicAnalysisGUI:
                                                 fg_color="#0d1520", corner_radius=5)
         self.iocs_domains_list.pack(fill="x", padx=10, pady=(0, 10))
 
-        # Notes section
-        notes_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="transparent")
+        # Notes section header - Clickable
+        notes_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
         notes_header.pack(fill="x", pady=(10, 5))
-        
-        notes_title = ctk.CTkLabel(notes_header, text="Case Notes",
+
+        notes_header_inner = ctk.CTkFrame(notes_header, fg_color="transparent", cursor="hand2")
+        notes_header_inner.pack(fill="x", padx=15, pady=10)
+
+        # Expand indicator for Notes
+        self.notes_expand_indicator = ctk.CTkLabel(notes_header_inner, text="▼",
+                                                   font=Fonts.body_large,
+                                                   text_color="gray60",
+                                                   cursor="hand2")
+        self.notes_expand_indicator.pack(side="left", padx=(0, 10))
+
+        notes_title = ctk.CTkLabel(notes_header_inner, text="Case Notes",
                                   font=Fonts.title_medium,
-                                  text_color="white")
-        notes_title.pack(side="left", padx=15)
-        
+                                  text_color="white",
+                                  cursor="hand2")
+        notes_title.pack(side="left")
+
         # Save notes button
-        btn_save_notes = ctk.CTkButton(notes_header, text="💾 Save Notes",
+        btn_save_notes = ctk.CTkButton(notes_header_inner, text="💾 Save Notes",
                                       command=self.handle_save_notes,
                                       height=30, width=100,
                                       fg_color=self.colors["red"],
                                       hover_color=self.colors["red_dark"],
                                       font=Fonts.label)
-        btn_save_notes.pack(side="right", padx=15)
-        
-        # Notes text area
+        btn_save_notes.pack(side="right")
+
+        # Notes text area (collapsible)
         notes_container = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20")
         notes_container.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Track visibility state
+        self.notes_section_visible = [True]
+
+        # Toggle function for Notes section
+        def toggle_notes_section(event=None):
+            # Prevent toggle when clicking the Save Notes button
+            if event and hasattr(event.widget, 'cget'):
+                try:
+                    if event.widget.cget('text') == "💾 Save Notes":
+                        return
+                except:
+                    pass
+
+            if self.notes_section_visible[0]:
+                notes_container.pack_forget()
+                self.notes_expand_indicator.configure(text="▶")
+                self.notes_section_visible[0] = False
+            else:
+                notes_container.pack(fill="both", expand=True, pady=(0, 10))
+                self.notes_expand_indicator.configure(text="▼")
+                self.notes_section_visible[0] = True
+
+        # Bind click events
+        notes_header.bind("<Button-1>", toggle_notes_section)
+        notes_header_inner.bind("<Button-1>", toggle_notes_section)
+        notes_title.bind("<Button-1>", toggle_notes_section)
+        self.notes_expand_indicator.bind("<Button-1>", toggle_notes_section)
         
         self.notes_textbox = tk.Text(
             notes_container,

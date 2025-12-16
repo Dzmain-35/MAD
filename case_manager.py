@@ -3,7 +3,7 @@ Case Manager Module
 Handles case creation, file management, and metadata collection
 
 Requirements:
-pip install requests yara-python
+pip install requests yara-python ssdeep
 """
 
 import os
@@ -295,29 +295,31 @@ class CaseManager:
         
         # Calculate hashes
         print("Calculating hashes...")
-        md5, sha256, imphash = self.calculate_hashes(dest_path)
+        md5, sha256, imphash, ssdeep = self.calculate_hashes(dest_path)
         print(f"  MD5: {md5}")
         print(f"  SHA256: {sha256}")
         print(f"  IMPHASH: {imphash}")
-        
+        print(f"  SSDEEP: {ssdeep}")
+
         # Get file size
         file_size = os.path.getsize(dest_path)
         print(f"File size: {file_size} bytes")
-        
+
         # Scan with YARA
         yara_matches = self.scan_with_yara(dest_path)
-        
+
         # Query VirusTotal
         print("Querying VirusTotal...")
-        vt_hits, vt_family = self.query_virustotal(sha256)
-        print(f"  VT Hits: {vt_hits}")
+        vt_hits, vt_total, vt_family, vt_link = self.query_virustotal(sha256)
+        print(f"  VT Hits: {vt_hits}/{vt_total}")
         print(f"  VT Family: {vt_family}")
-        
+        print(f"  VT Link: {vt_link}")
+
         # Get THQ Family using MD5
         print("Querying ThreatHQ...")
         thq_family = self.get_thq_family(md5)
         print(f"  THQ Family: {thq_family}")
-        
+
         # Check if file is whitelisted
         is_whitelisted = sha256.lower() in self.whitelisted_hashes
         if is_whitelisted:
@@ -336,11 +338,14 @@ class CaseManager:
             "md5": md5,
             "sha256": sha256,
             "imphash": imphash,
+            "ssdeep": ssdeep,
             "file_size": file_size,
             "whitelisted": is_whitelisted,
             "yara_matches": yara_matches,
             "vt_hits": vt_hits,
+            "vt_total": vt_total,
             "vt_family": vt_family,
+            "vt_link": vt_link,
             "thq_family": thq_family,
             "threat_score": threat_score,
             "threat_level": threat_level,
@@ -356,23 +361,23 @@ class CaseManager:
     
     def calculate_hashes(self, file_path: str) -> tuple:
         """
-        Calculate MD5, SHA256, and IMPHASH for a file
-        
+        Calculate MD5, SHA256, IMPHASH, and SSDEEP for a file
+
         Args:
             file_path: Path to the file
-            
+
         Returns:
-            Tuple of (md5, sha256, imphash)
+            Tuple of (md5, sha256, imphash, ssdeep)
         """
         md5_hash = hashlib.md5()
         sha256_hash = hashlib.sha256()
-        
+
         # Read file and calculate hashes
         with open(file_path, 'rb') as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 md5_hash.update(chunk)
                 sha256_hash.update(chunk)
-        
+
         # IMPHASH calculation (requires pefile for PE files)
         imphash = "N/A"
         try:
@@ -381,33 +386,80 @@ class CaseManager:
             imphash = pe.get_imphash()
         except:
             pass  # Not a PE file or pefile not installed
-        
-        return md5_hash.hexdigest(), sha256_hash.hexdigest(), imphash
+
+        # SSDEEP calculation (fuzzy hash)
+        ssdeep_hash = "N/A"
+        try:
+            import ssdeep
+            ssdeep_hash = ssdeep.hash_from_file(file_path)
+        except ImportError:
+            pass  # ssdeep not installed
+        except Exception:
+            pass  # Error calculating ssdeep
+
+        return md5_hash.hexdigest(), sha256_hash.hexdigest(), imphash, ssdeep_hash
     
-    def scan_with_yara(self, file_path: str) -> List[str]:
+    def scan_with_yara(self, file_path: str) -> List[Dict]:
         """
         Scan file with YARA rules
-        
+
         Args:
             file_path: Path to file to scan
-            
+
         Returns:
-            List of matched rule names
+            List of dictionaries containing rule name and matched strings
+            Format: [{"rule": "RuleName", "strings": [(offset, identifier, data), ...]}, ...]
         """
         if not self.yara_rules:
             print(f"WARNING: No YARA rules loaded, skipping scan for {file_path}")
             return []
-        
+
         try:
             print(f"Scanning {os.path.basename(file_path)} with YARA...")
             matches = self.yara_rules.match(file_path)
-            
+
+            match_details = []
             if matches:
                 print(f"  ✓ YARA MATCHES FOUND: {[m.rule for m in matches]}")
+                for match in matches:
+                    # Extract matched strings with their details
+                    matched_strings = []
+                    for string_match in match.strings:
+                        # string_match is a yara.StringMatch object with attributes
+                        identifier = string_match.identifier
+
+                        # Each StringMatch can have multiple instances (locations where it matched)
+                        for instance in string_match.instances:
+                            offset = instance.offset
+                            data = instance.matched_data
+
+                            # Convert bytes to string for display, handle binary data
+                            try:
+                                if isinstance(data, bytes):
+                                    # Try to decode as UTF-8, fallback to repr for binary
+                                    try:
+                                        data_str = data.decode('utf-8', errors='ignore')
+                                    except:
+                                        data_str = repr(data)
+                                else:
+                                    data_str = str(data)
+                            except:
+                                data_str = repr(data)
+
+                            matched_strings.append({
+                                "offset": offset,
+                                "identifier": identifier,
+                                "data": data_str
+                            })
+
+                    match_details.append({
+                        "rule": match.rule,
+                        "strings": matched_strings
+                    })
             else:
                 print(f"  - No YARA matches")
-            
-            return [match.rule for match in matches]
+
+            return match_details
         except Exception as e:
             print(f"YARA scan error for {file_path}: {e}")
             import traceback
@@ -417,28 +469,42 @@ class CaseManager:
     def query_virustotal(self, sha256: str) -> tuple:
         """
         Query VirusTotal for file information
-        
+
         Args:
             sha256: SHA256 hash of the file
-            
+
         Returns:
-            Tuple of (detection_count, most_common_family)
+            Tuple of (detection_count, total_scans, most_common_family, vt_link)
         """
+        vt_link = f"https://www.virustotal.com/gui/file/{sha256}"
+
         if not self.vt_api_key:
-            return 0, "Unknown"
-        
+            return 0, 0, "Unknown", vt_link
+
         try:
             url = f"https://www.virustotal.com/api/v3/files/{sha256}"
             headers = {"x-apikey": self.vt_api_key}
-            
+
             print(f"  Querying VT for SHA256: {sha256[:16]}...")
             response = requests.get(url, headers=headers, timeout=10)
-            
+
             if response.status_code == 200:
                 data = response.json()
                 stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
                 malicious = stats.get("malicious", 0)
-                
+
+                # Calculate total scans (all engines that scanned the file)
+                total_scans = sum([
+                    stats.get("malicious", 0),
+                    stats.get("suspicious", 0),
+                    stats.get("undetected", 0),
+                    stats.get("harmless", 0),
+                    stats.get("timeout", 0),
+                    stats.get("confirmed-timeout", 0),
+                    stats.get("failure", 0),
+                    stats.get("type-unsupported", 0)
+                ])
+
                 # Extract most common family name
                 results = data.get("data", {}).get("attributes", {}).get("last_analysis_results", {})
                 families = []
@@ -450,33 +516,33 @@ class CaseManager:
                             family = result_name.split('.')[0].split(':')[0].split('/')[0]
                             if family and len(family) > 2:
                                 families.append(family)
-                
+
                 # Get most common family
                 if families:
                     from collections import Counter
                     most_common = Counter(families).most_common(1)[0][0]
                 else:
                     most_common = "Unknown"
-                
-                print(f"    VT Response: {malicious} detections, Family: {most_common}")
-                return malicious, most_common
-            
+
+                print(f"    VT Response: {malicious}/{total_scans} detections, Family: {most_common}")
+                return malicious, total_scans, most_common, vt_link
+
             elif response.status_code == 404:
                 print(f"    VT Response: File not found in database")
-                return 0, "Unknown"
-            
+                return 0, 0, "Unknown", vt_link
+
             elif response.status_code == 429:
                 print(f"    VT Response: Rate limit exceeded, skipping VT check")
-                return 0, "RateLimited"
-            
+                return 0, 0, "RateLimited", vt_link
+
             else:
                 print(f"    VT Response: Error {response.status_code}")
-                return 0, "Unknown"
-            
+                return 0, 0, "Unknown", vt_link
+
         except Exception as e:
             print(f"    VirusTotal query error: {e}")
-        
-        return 0, "Unknown"
+
+        return 0, 0, "Unknown", vt_link
     
     def get_thq_family(self, md5_hash: str) -> str:
         """
@@ -512,20 +578,21 @@ class CaseManager:
             print(f"ThreatHQ query error: {e}")
             return "Unknown"
     
-    def calculate_threat_score(self, yara_matches: List[str], vt_hits: int) -> int:
+    def calculate_threat_score(self, yara_matches: List[Dict], vt_hits: int) -> int:
         """
         Calculate threat score based on YARA matches and VT hits
-        
+
         Args:
-            yara_matches: List of YARA rule matches
+            yara_matches: List of YARA rule match dictionaries
             vt_hits: Number of VirusTotal detections
-            
+
         Returns:
             Threat score (0-100)
         """
         score = 0
-        
+
         # YARA matches contribute up to 40 points
+        # yara_matches is now a list of dicts, so count the number of rules matched
         score += min(len(yara_matches) * 20, 40)
         
         # VT hits contribute up to 60 points
@@ -763,15 +830,61 @@ class CaseManager:
     def format_file_details(self, file_info: Dict) -> str:
         """
         Format file details for display
-        
+
         Args:
             file_info: File information dictionary
-            
+
         Returns:
             Formatted string for display
         """
-        yara_display = ", ".join(file_info["yara_matches"]) if file_info["yara_matches"] else "None"
-        
+        # Format YARA matches with detailed information
+        yara_matches = file_info.get("yara_matches", [])
+        if yara_matches:
+            yara_details = []
+            # Handle both old format (list of strings) and new format (list of dicts)
+            for match in yara_matches:
+                if isinstance(match, str):
+                    # Old format: just rule names
+                    yara_details.append(f"\n  Rule: {match}")
+                elif isinstance(match, dict):
+                    # New format: dict with rule name and matched strings
+                    rule_name = match.get("rule", "Unknown")
+                    matched_strings = match.get("strings", [])
+
+                    yara_details.append(f"\n  Rule: {rule_name}")
+                    if matched_strings:
+                        yara_details.append(f"  Matched Strings ({len(matched_strings)}):")
+                        # Show up to 5 matched strings to avoid overwhelming output
+                        for i, string_info in enumerate(matched_strings[:5], 1):
+                            offset = string_info.get("offset", "?")
+                            identifier = string_info.get("identifier", "?")
+                            data = string_info.get("data", "")
+                            # Truncate long strings for display
+                            if len(data) > 60:
+                                data = data[:57] + "..."
+                            yara_details.append(f"    {i}. [{identifier}] @ 0x{offset:X}: {data}")
+
+                        if len(matched_strings) > 5:
+                            yara_details.append(f"    ... and {len(matched_strings) - 5} more")
+                    else:
+                        yara_details.append("  No string matches captured")
+
+            yara_display = "\n".join(yara_details)
+        else:
+            yara_display = "\n  None"
+
+        # Format VT information
+        vt_hits = file_info.get('vt_hits', 0)
+        vt_total = file_info.get('vt_total', 0)
+        vt_link = file_info.get('vt_link', 'N/A')
+
+        if vt_total > 0:
+            vt_ratio = f"{vt_hits}/{vt_total}"
+            vt_link_line = f"\nVT Link: {vt_link}"
+        else:
+            vt_ratio = f"{vt_hits}"
+            vt_link_line = ""  # Don't show link if file not found in VT
+
         details = f"""File Details:
 ==================================================================
 File Name: {file_info['filename']}
@@ -779,32 +892,45 @@ MD5: {file_info['md5']}
 SHA256: {file_info['sha256']}
 File Size: {file_info['file_size']} bytes
 ==================================================================
-IMPHASH: {file_info['imphash']}
-YARA Rule: {yara_display}
-VT Hits: {file_info['vt_hits']}
-THQ Family: {file_info['thq_family']}
-Threat Score: {file_info['threat_score']} ({file_info['threat_level']})
+IMPHASH: {file_info.get('imphash', 'N/A')}
+SSDEEP: {file_info.get('ssdeep', 'N/A')}
+==================================================================
+YARA Matches:{yara_display}
+==================================================================
+VT Detection: {vt_ratio}
+VT Family: {file_info.get('vt_family', 'Unknown')}{vt_link_line}
+THQ Family: {file_info.get('thq_family', 'Unknown')}
+Threat Score: {file_info.get('threat_score', 0)} ({file_info.get('threat_level', 'Unknown')})
 =================================================================="""
-        
+
         return details
     
-    def get_yara_display_text(self, yara_matches: List[str]) -> str:
+    def get_yara_display_text(self, yara_matches: List) -> str:
         """
         Format YARA matches for GUI display (e.g., "RuleName +2")
-        
+
         Args:
-            yara_matches: List of YARA rule matches
-            
+            yara_matches: List of YARA rule matches (strings or dictionaries)
+
         Returns:
             Formatted string for display
         """
         if not yara_matches:
             return "No Matches"
-        
+
+        # Handle both old format (list of strings) and new format (list of dicts)
+        first_match = yara_matches[0]
+        if isinstance(first_match, str):
+            # Old format
+            rule_name = first_match
+        else:
+            # New format
+            rule_name = first_match.get("rule", "Unknown")
+
         if len(yara_matches) == 1:
-            return yara_matches[0]
-        
-        return f"{yara_matches[0]} +{len(yara_matches) - 1}"
+            return rule_name
+
+        return f"{rule_name} +{len(yara_matches) - 1}"
     
     def save_case_metadata(self, case_dir: str, case_data: Dict):
         """

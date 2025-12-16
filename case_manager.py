@@ -880,8 +880,10 @@ class CaseManager:
 
         if vt_total > 0:
             vt_ratio = f"{vt_hits}/{vt_total}"
+            vt_link_line = f"\nVT Link: {vt_link}"
         else:
             vt_ratio = f"{vt_hits}"
+            vt_link_line = ""  # Don't show link if file not found in VT
 
         details = f"""File Details:
 ==================================================================
@@ -896,8 +898,7 @@ SSDEEP: {file_info.get('ssdeep', 'N/A')}
 YARA Matches:{yara_display}
 ==================================================================
 VT Detection: {vt_ratio}
-VT Family: {file_info.get('vt_family', 'Unknown')}
-VT Link: {vt_link}
+VT Family: {file_info.get('vt_family', 'Unknown')}{vt_link_line}
 THQ Family: {file_info.get('thq_family', 'Unknown')}
 Threat Score: {file_info.get('threat_score', 0)} ({file_info.get('threat_level', 'Unknown')})
 =================================================================="""

@@ -4,7 +4,6 @@ meta:
     description = "Identifies Janela RAT malware"
 strings: 
     $str1 = "identity_helper.exe" nocase
-	$str2 = "Janela"
 	$str4 = "amxx1515cabreun23"
 	$str5 = "20.0.152.185"
 	$str6 = "http://20.15.106.83/RPS/AVR/index.php"

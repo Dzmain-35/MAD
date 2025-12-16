@@ -8,6 +8,7 @@ import os
 import threading
 import subprocess
 import platform
+import webbrowser
 from analysis_modules.process_monitor import ProcessMonitor
 from analysis_modules.network_monitor import NetworkMonitor
 from analysis_modules.procmon_events import ProcmonLiveMonitor, ProcmonEvent
@@ -482,34 +483,6 @@ class ForensicAnalysisGUI:
         self.files_list_frame = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="transparent")
         self.files_list_frame.pack(fill="x", pady=(0, 10))
 
-        # Track visibility state
-        self.files_section_visible = [True]
-
-        # Toggle function for files section
-        def toggle_files_section(event=None):
-            # Prevent toggle when clicking the Add Files button
-            if event and hasattr(event.widget, 'cget'):
-                try:
-                    if event.widget.cget('text') == "➕ Add Files":
-                        return
-                except:
-                    pass
-
-            if self.files_section_visible[0]:
-                self.files_list_frame.pack_forget()
-                self.files_expand_indicator.configure(text="▶")
-                self.files_section_visible[0] = False
-            else:
-                self.files_list_frame.pack(fill="x", pady=(0, 10))
-                self.files_expand_indicator.configure(text="▼")
-                self.files_section_visible[0] = True
-
-        # Bind click events
-        files_header.bind("<Button-1>", toggle_files_section)
-        files_header_inner.bind("<Button-1>", toggle_files_section)
-        files_title.bind("<Button-1>", toggle_files_section)
-        self.files_expand_indicator.bind("<Button-1>", toggle_files_section)
-
         # IOCs section header - Clickable
         iocs_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
         iocs_header.pack(fill="x", pady=(10, 5))
@@ -546,8 +519,63 @@ class ForensicAnalysisGUI:
         self.iocs_content_frame = ctk.CTkFrame(iocs_container, fg_color="transparent")
         self.iocs_content_frame.pack(fill="both", expand=True, padx=15, pady=15)
 
-        # Track visibility state
+        # Notes section header - Clickable
+        notes_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
+        notes_header.pack(fill="x", pady=(10, 5))
+
+        notes_header_inner = ctk.CTkFrame(notes_header, fg_color="transparent", cursor="hand2")
+        notes_header_inner.pack(fill="x", padx=15, pady=10)
+
+        # Expand indicator for Notes
+        self.notes_expand_indicator = ctk.CTkLabel(notes_header_inner, text="▼",
+                                                   font=Fonts.body_large,
+                                                   text_color="gray60",
+                                                   cursor="hand2")
+        self.notes_expand_indicator.pack(side="left", padx=(0, 10))
+
+        notes_title = ctk.CTkLabel(notes_header_inner, text="Case Notes",
+                                  font=Fonts.title_medium,
+                                  text_color="white",
+                                  cursor="hand2")
+        notes_title.pack(side="left")
+
+        # Save notes button
+        btn_save_notes = ctk.CTkButton(notes_header_inner, text="💾 Save Notes",
+                                      command=self.handle_save_notes,
+                                      height=30, width=100,
+                                      fg_color=self.colors["red"],
+                                      hover_color=self.colors["red_dark"],
+                                      font=Fonts.label)
+        btn_save_notes.pack(side="right")
+
+        # Notes text area (collapsible)
+        notes_container = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20")
+        notes_container.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Track visibility states
+        self.files_section_visible = [True]
         self.iocs_section_visible = [True]
+        self.notes_section_visible = [True]
+
+        # Toggle function for files section
+        def toggle_files_section(event=None):
+            # Prevent toggle when clicking the Add Files button
+            if event and hasattr(event.widget, 'cget'):
+                try:
+                    if event.widget.cget('text') == "➕ Add Files":
+                        return
+                except:
+                    pass
+
+            if self.files_section_visible[0]:
+                self.files_list_frame.pack_forget()
+                self.files_expand_indicator.configure(text="▶")
+                self.files_section_visible[0] = False
+            else:
+                # Re-pack before the IOCs header to maintain position
+                self.files_list_frame.pack(fill="x", pady=(0, 10), before=iocs_header)
+                self.files_expand_indicator.configure(text="▼")
+                self.files_section_visible[0] = True
 
         # Toggle function for IOCs section
         def toggle_iocs_section(event=None):
@@ -564,15 +592,48 @@ class ForensicAnalysisGUI:
                 self.iocs_expand_indicator.configure(text="▶")
                 self.iocs_section_visible[0] = False
             else:
-                iocs_container.pack(fill="x", pady=(0, 10))
+                # Re-pack before the Notes header to maintain position
+                iocs_container.pack(fill="x", pady=(0, 10), before=notes_header)
                 self.iocs_expand_indicator.configure(text="▼")
                 self.iocs_section_visible[0] = True
 
-        # Bind click events
+        # Toggle function for Notes section
+        def toggle_notes_section(event=None):
+            # Prevent toggle when clicking the Save Notes button
+            if event and hasattr(event.widget, 'cget'):
+                try:
+                    if event.widget.cget('text') == "💾 Save Notes":
+                        return
+                except:
+                    pass
+
+            if self.notes_section_visible[0]:
+                notes_container.pack_forget()
+                self.notes_expand_indicator.configure(text="▶")
+                self.notes_section_visible[0] = False
+            else:
+                # Re-pack at end
+                notes_container.pack(fill="both", expand=True, pady=(0, 10))
+                self.notes_expand_indicator.configure(text="▼")
+                self.notes_section_visible[0] = True
+
+        # Bind click events for files section
+        files_header.bind("<Button-1>", toggle_files_section)
+        files_header_inner.bind("<Button-1>", toggle_files_section)
+        files_title.bind("<Button-1>", toggle_files_section)
+        self.files_expand_indicator.bind("<Button-1>", toggle_files_section)
+
+        # Bind click events for IOCs section
         iocs_header.bind("<Button-1>", toggle_iocs_section)
         iocs_header_inner.bind("<Button-1>", toggle_iocs_section)
         iocs_title.bind("<Button-1>", toggle_iocs_section)
         self.iocs_expand_indicator.bind("<Button-1>", toggle_iocs_section)
+
+        # Bind click events for Notes section
+        notes_header.bind("<Button-1>", toggle_notes_section)
+        notes_header_inner.bind("<Button-1>", toggle_notes_section)
+        notes_title.bind("<Button-1>", toggle_notes_section)
+        self.notes_expand_indicator.bind("<Button-1>", toggle_notes_section)
 
         # IOCs lists
         self.iocs_urls_frame = ctk.CTkFrame(self.iocs_content_frame, fg_color="#1a1a1a", corner_radius=5)
@@ -611,67 +672,7 @@ class ForensicAnalysisGUI:
                                                 fg_color="#0d1520", corner_radius=5)
         self.iocs_domains_list.pack(fill="x", padx=10, pady=(0, 10))
 
-        # Notes section header - Clickable
-        notes_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
-        notes_header.pack(fill="x", pady=(10, 5))
-
-        notes_header_inner = ctk.CTkFrame(notes_header, fg_color="transparent", cursor="hand2")
-        notes_header_inner.pack(fill="x", padx=15, pady=10)
-
-        # Expand indicator for Notes
-        self.notes_expand_indicator = ctk.CTkLabel(notes_header_inner, text="▼",
-                                                   font=Fonts.body_large,
-                                                   text_color="gray60",
-                                                   cursor="hand2")
-        self.notes_expand_indicator.pack(side="left", padx=(0, 10))
-
-        notes_title = ctk.CTkLabel(notes_header_inner, text="Case Notes",
-                                  font=Fonts.title_medium,
-                                  text_color="white",
-                                  cursor="hand2")
-        notes_title.pack(side="left")
-
-        # Save notes button
-        btn_save_notes = ctk.CTkButton(notes_header_inner, text="💾 Save Notes",
-                                      command=self.handle_save_notes,
-                                      height=30, width=100,
-                                      fg_color=self.colors["red"],
-                                      hover_color=self.colors["red_dark"],
-                                      font=Fonts.label)
-        btn_save_notes.pack(side="right")
-
-        # Notes text area (collapsible)
-        notes_container = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20")
-        notes_container.pack(fill="both", expand=True, pady=(0, 10))
-
-        # Track visibility state
-        self.notes_section_visible = [True]
-
-        # Toggle function for Notes section
-        def toggle_notes_section(event=None):
-            # Prevent toggle when clicking the Save Notes button
-            if event and hasattr(event.widget, 'cget'):
-                try:
-                    if event.widget.cget('text') == "💾 Save Notes":
-                        return
-                except:
-                    pass
-
-            if self.notes_section_visible[0]:
-                notes_container.pack_forget()
-                self.notes_expand_indicator.configure(text="▶")
-                self.notes_section_visible[0] = False
-            else:
-                notes_container.pack(fill="both", expand=True, pady=(0, 10))
-                self.notes_expand_indicator.configure(text="▼")
-                self.notes_section_visible[0] = True
-
-        # Bind click events
-        notes_header.bind("<Button-1>", toggle_notes_section)
-        notes_header_inner.bind("<Button-1>", toggle_notes_section)
-        notes_title.bind("<Button-1>", toggle_notes_section)
-        self.notes_expand_indicator.bind("<Button-1>", toggle_notes_section)
-        
+        # Notes text widget
         self.notes_textbox = tk.Text(
             notes_container,
             wrap="word",
@@ -2320,39 +2321,83 @@ class ForensicAnalysisGUI:
             self.progress_window = None
     
     def handle_add_files(self):
-        """Handle adding files to existing case - delegates to case_manager"""
+        """Handle adding files to existing case with progress window"""
         if not self.current_case:
             messagebox.showwarning("No Case", "Please create a case first")
             return
-        
+
         if self.scan_in_progress:
             messagebox.showwarning("Scan in Progress", "Please wait for current scan to complete")
             return
-        
+
         files = filedialog.askopenfilenames(title="Add files to case")
         if not files:
             return
-        
+
         self.scan_in_progress = True
-        
-        try:
-            # Add files using case_manager
-            case_data = self.case_manager.add_files_to_case(list(files))
-            self.current_case = case_data
-            
-            self.update_current_case_display()
-            messagebox.showinfo(
-                "Success", 
-                f"Added {len(files)} files to case\n"
-                f"Total files: {len(case_data['files'])}\n"
-                f"Total threats: {case_data['total_threats']}"
-            )
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to add files: {str(e)}")
-        
-        finally:
-            self.scan_in_progress = False
+        self.cancel_scan = False
+
+        # Create progress window
+        self.create_progress_window(len(files))
+
+        # Run in thread
+        def add_files_thread():
+            try:
+                case_id = self.current_case["id"]
+                case_dir = os.path.join(self.case_manager.case_storage_path, case_id)
+                files_dir = os.path.join(case_dir, "files")
+
+                for i, file_path in enumerate(files):
+                    if self.cancel_scan:
+                        self.root.after(0, self.close_progress_window)
+                        self.root.after(0, lambda: messagebox.showinfo("Cancelled", "Scan cancelled by user"))
+                        self.scan_in_progress = False
+                        return
+
+                    filename = os.path.basename(file_path)
+
+                    # Update progress
+                    self.root.after(0, self.update_progress, i + 1, len(files), f"Scanning: {filename}")
+
+                    # Process file
+                    file_info = self.case_manager.process_file(file_path, files_dir, case_id)
+                    self.current_case["files"].append(file_info)
+
+                    # Update case statistics
+                    if not file_info.get("whitelisted", False):
+                        has_yara = len(file_info["yara_matches"]) > 0
+                        has_thq = file_info["thq_family"] and file_info["thq_family"] not in ["Unknown", "N/A"]
+                        has_vt = file_info["vt_hits"] > 0
+
+                        if has_yara or has_thq or has_vt:
+                            self.current_case["total_threats"] += 1
+                        self.current_case["total_vt_hits"] += file_info["vt_hits"]
+
+                # Save case metadata
+                self.case_manager.save_case_metadata(case_dir, self.current_case)
+
+                # Close progress window and update display
+                self.root.after(0, self.close_progress_window)
+                self.root.after(0, self.update_current_case_display)
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Success",
+                    f"Added {len(files)} files to case\n"
+                    f"Total files: {len(self.current_case['files'])}\n"
+                    f"Total threats: {self.current_case['total_threats']}"
+                ))
+
+            except Exception as e:
+                self.root.after(0, self.close_progress_window)
+                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to add files: {str(e)}"))
+                import traceback
+                traceback.print_exc()
+
+            finally:
+                self.scan_in_progress = False
+
+        import threading
+        thread = threading.Thread(target=add_files_thread, daemon=True)
+        thread.start()
     
     def handle_add_ioc(self):
         """Show dialog to add IOC to current case"""
@@ -2717,9 +2762,9 @@ File Size: {file_info['file_size']} bytes"""
         # Create a text widget for better formatting
         details_text_frame = ctk.CTkFrame(parent_frame, fg_color="gray10")
         details_text_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
+
         details_text = self.case_manager.format_file_details(file_info)
-        
+
         # Use text widget for selectable text
         text_widget = tk.Text(
             details_text_frame,
@@ -2730,9 +2775,38 @@ File Size: {file_info['file_size']} bytes"""
             height=12,
             relief="flat",
             padx=10,
-            pady=10
+            pady=10,
+            cursor="arrow"
         )
+
+        # Configure tag for clickable links
+        text_widget.tag_config("link", foreground="#4a9eff", underline=True)
+        text_widget.tag_bind("link", "<Enter>", lambda e: text_widget.config(cursor="hand2"))
+        text_widget.tag_bind("link", "<Leave>", lambda e: text_widget.config(cursor="arrow"))
+
+        # Insert the text
         text_widget.insert("1.0", details_text)
+
+        # Find and tag VT link if present
+        vt_link = file_info.get('vt_link', '')
+        if vt_link and vt_link != 'N/A':
+            # Search for the VT link in the text
+            start_pos = "1.0"
+            while True:
+                start_pos = text_widget.search(vt_link, start_pos, tk.END)
+                if not start_pos:
+                    break
+                end_pos = f"{start_pos}+{len(vt_link)}c"
+                text_widget.tag_add("link", start_pos, end_pos)
+
+                # Bind click to open in browser
+                def open_link(event, url=vt_link):
+                    webbrowser.open(url)
+                    return "break"
+
+                text_widget.tag_bind("link", "<Button-1>", open_link)
+                start_pos = end_pos
+
         text_widget.configure(state="disabled")  # Make read-only
         text_widget.pack(fill="both", expand=True)
     

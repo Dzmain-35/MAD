@@ -2868,6 +2868,15 @@ File Size: {file_info['file_size']} bytes"""
     
     def refresh_process_list(self):
         """Refresh the process tree with parent-child hierarchy using incremental updates"""
+        # Check if a filter is active - if so, use filter_processes instead
+        search_text = self.process_search_entry.get().strip() if hasattr(self, 'process_search_entry') else ""
+        filter_choice = self.process_filter_var.get() if hasattr(self, 'process_filter_var') else "All Processes"
+
+        # If any filter is active, delegate to filter_processes to maintain filtered view
+        if search_text or filter_choice != "All Processes":
+            self.filter_processes()
+            return
+
         # Get all current processes
         processes = self.process_monitor.get_all_processes()
 

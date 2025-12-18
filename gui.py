@@ -3103,6 +3103,10 @@ File Size: {file_info['file_size']} bytes"""
 
         # If no filters applied, refresh to show all
         if not search_text and filter_choice == "All Processes":
+            # Clear the tree to ensure full rebuild when switching from filtered to unfiltered view
+            for item in self.process_tree.get_children():
+                self.process_tree.delete(item)
+            self.pid_to_tree_item.clear()
             self.refresh_process_list()
             return
 

@@ -3602,48 +3602,7 @@ Errors: {scan_stats['errors']}"""
             font=Fonts.logo_subtitle
         )
         title.pack(side="left", padx=20, pady=15)
-        
-        # Tab buttons
-        tab_frame = ctk.CTkFrame(main_container, fg_color="transparent")
-        tab_frame.pack(fill="x", padx=0, pady=(0, 10))
-        
-        btn_info = ctk.CTkButton(
-            tab_frame,
-            text="📋 Process Info",
-            command=lambda: show_tab("info"),
-            height=35,
-            width=150,
-            fg_color=self.colors["red"],
-            hover_color=self.colors["red_dark"]
-        )
-        btn_info.pack(side="left", padx=5)
-        
-        btn_strings = ctk.CTkButton(
-            tab_frame,
-            text="📄 Strings",
-            command=lambda: show_tab("strings"),
-            height=35,
-            width=150,
-            fg_color="transparent",
-            hover_color=self.colors["navy"],
-            border_width=2,
-            border_color=self.colors["red"]
-        )
-        btn_strings.pack(side="left", padx=5)
 
-        btn_events = ctk.CTkButton(
-            tab_frame,
-            text="📊 Live Events",
-            command=lambda: show_tab("events"),
-            height=35,
-            width=150,
-            fg_color="transparent",
-            hover_color=self.colors["navy"],
-            border_width=2,
-            border_color=self.colors["red"]
-        )
-        btn_events.pack(side="left", padx=5)
-        
         # Content area
         content_area = ctk.CTkFrame(main_container, fg_color=self.colors["navy"])
         content_area.pack(fill="both", expand=True)
@@ -4299,10 +4258,11 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
         details_window.protocol("WM_DELETE_WINDOW", on_window_close)
 
-        # Tab switching
+        # Tab switching - Define tabs and buttons dictionary first
         tabs = {"info": info_frame, "strings": strings_frame, "events": events_frame}
-        buttons = {"info": btn_info, "strings": btn_strings, "events": btn_events}
+        buttons = {}  # Will be populated after buttons are created
 
+        # Define show_tab function before creating buttons
         def show_tab(tab_name):
             for name, frame in tabs.items():
                 frame.pack_forget()
@@ -4326,6 +4286,53 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             if tab_name == "events" and not event_monitor_state["monitoring"]:
                 toggle_monitoring()
 
+        # Now create tab buttons after show_tab is defined
+        tab_frame = ctk.CTkFrame(main_container, fg_color="transparent")
+        tab_frame.pack(fill="x", padx=0, pady=(0, 10), before=content_area)
+
+        btn_info = ctk.CTkButton(
+            tab_frame,
+            text="📋 Process Info",
+            command=lambda: show_tab("info"),
+            height=35,
+            width=150,
+            fg_color=self.colors["red"],
+            hover_color=self.colors["red_dark"]
+        )
+        btn_info.pack(side="left", padx=5)
+
+        btn_strings = ctk.CTkButton(
+            tab_frame,
+            text="📄 Strings",
+            command=lambda: show_tab("strings"),
+            height=35,
+            width=150,
+            fg_color="transparent",
+            hover_color=self.colors["navy"],
+            border_width=2,
+            border_color=self.colors["red"]
+        )
+        btn_strings.pack(side="left", padx=5)
+
+        btn_events = ctk.CTkButton(
+            tab_frame,
+            text="📊 Live Events",
+            command=lambda: show_tab("events"),
+            height=35,
+            width=150,
+            fg_color="transparent",
+            hover_color=self.colors["navy"],
+            border_width=2,
+            border_color=self.colors["red"]
+        )
+        btn_events.pack(side="left", padx=5)
+
+        # Populate buttons dictionary after buttons are created
+        buttons["info"] = btn_info
+        buttons["strings"] = btn_strings
+        buttons["events"] = btn_events
+
+        # Show initial tab
         show_tab("info")
 
     def open_folder_location(self):

@@ -3824,6 +3824,19 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             font=Fonts.label
         )
         refresh_btn.pack(side="left", padx=15)
+
+        # Export button
+        export_btn = ctk.CTkButton(
+            filter_row,
+            text="💾 Export Strings",
+            command=lambda: None,  # Will be set later
+            height=30,
+            width=140,
+            fg_color=self.colors["blue"],
+            hover_color=self.colors["blue_dark"],
+            font=Fonts.label
+        )
+        export_btn.pack(side="left", padx=5)
         
         # Strings text area
         strings_text_frame = ctk.CTkFrame(strings_frame, fg_color="gray20")
@@ -3925,6 +3938,104 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         min_length_entry.bind("<KeyRelease>", search_strings)
         max_length_entry.bind("<KeyRelease>", search_strings)
 
+        def export_strings():
+            """Export all extracted strings to a file"""
+            if not all_strings_data["strings"]:
+                messagebox.showwarning("No Strings", "No strings have been extracted yet. Please wait for extraction to complete.")
+                return
+
+            try:
+                # Determine default save location
+                if self.case_manager.current_case:
+                    # Save to case folder
+                    case_id = self.case_manager.current_case["id"]
+                    case_dir = os.path.join(self.case_manager.case_storage_path, case_id)
+
+                    # Create strings subfolder in case directory
+                    strings_dir = os.path.join(case_dir, "strings")
+                    os.makedirs(strings_dir, exist_ok=True)
+
+                    # Generate filename with timestamp
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"process_{pid}_strings_{timestamp}.txt"
+                    filepath = os.path.join(strings_dir, filename)
+                else:
+                    # Use file dialog
+                    from tkinter import filedialog
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filepath = filedialog.asksaveasfilename(
+                        defaultextension=".txt",
+                        filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+                        initialfile=f"process_{pid}_strings_{timestamp}.txt"
+                    )
+
+                    if not filepath:
+                        return  # User cancelled
+
+                # Categorize strings
+                strings = all_strings_data["strings"]
+                urls = [s for s in strings if ('http://' in s or 'https://' in s or 'www.' in s)]
+                ips = [s for s in strings if any(c.isdigit() and '.' in s for c in s)]
+                paths = [s for s in strings if ('\\' in s or '/' in s) and len(s) > 10]
+                others = [s for s in strings if s not in urls and s not in ips and s not in paths]
+
+                # Write to file
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    # Header
+                    f.write(f"Process Strings Export\n")
+                    f.write(f"{'='*80}\n")
+                    f.write(f"PID: {pid}\n")
+                    if process_info:
+                        f.write(f"Process Name: {process_info.get('name', 'Unknown')}\n")
+                        f.write(f"Executable: {process_info.get('exe', 'Unknown')}\n")
+                    f.write(f"Export Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Total Strings: {len(strings)}\n")
+                    quality_status = "Quality Filtered" if quality_filter_var.get() else "All Strings (Unfiltered)"
+                    f.write(f"Filter Status: {quality_status}\n")
+                    f.write(f"{'='*80}\n\n")
+
+                    # URLs/Domains
+                    if urls:
+                        f.write(f"URLs/Domains ({len(urls)}):\n")
+                        f.write(f"{'='*80}\n")
+                        for url in urls:
+                            f.write(f"{url}\n")
+                        f.write("\n")
+
+                    # IP Addresses
+                    if ips:
+                        f.write(f"IP Addresses ({len(ips)}):\n")
+                        f.write(f"{'='*80}\n")
+                        for ip in ips:
+                            f.write(f"{ip}\n")
+                        f.write("\n")
+
+                    # File Paths
+                    if paths:
+                        f.write(f"File Paths ({len(paths)}):\n")
+                        f.write(f"{'='*80}\n")
+                        for path in paths:
+                            f.write(f"{path}\n")
+                        f.write("\n")
+
+                    # Other Strings
+                    if others:
+                        f.write(f"Other Strings ({len(others)}):\n")
+                        f.write(f"{'='*80}\n")
+                        for other in others:
+                            f.write(f"{other}\n")
+
+                # Show success message
+                if self.case_manager.current_case:
+                    messagebox.showinfo("Export Successful",
+                        f"Exported {len(strings)} strings to case folder:\n{filepath}")
+                else:
+                    messagebox.showinfo("Export Successful",
+                        f"Exported {len(strings)} strings to:\n{filepath}")
+
+            except Exception as e:
+                messagebox.showerror("Export Error", f"Failed to export strings: {str(e)}")
+
         # Re-extract when quality filter changes
         def on_quality_filter_change():
             """Re-extract strings when quality filter setting changes"""
@@ -4009,6 +4120,9 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
         # Set refresh button command
         refresh_btn.configure(command=refresh_strings)
+
+        # Set export button command
+        export_btn.configure(command=export_strings)
 
         # Initial extraction
         threading.Thread(target=extract, daemon=True).start()

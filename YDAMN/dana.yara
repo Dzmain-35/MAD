@@ -3,18 +3,16 @@ rule Mal_DanaBot
 meta:
 	description = "Identifies Danabot malware"
 strings: 
-    $name = "MutCStealer"
-	$str2 = "MutCAddZipFile"
-	$str3 = "MutCInjectionProcessm"
-	$str4 = "LedxKBWF4MiM3x9F7zmCdaxnnu8A8SUohZ"
-	$str5 = "0xb49a8bad358c0adb639f43c035b8c06777487dd7"
-	$str6 = "MutCFileGrabber"
-	$str7 = "set-brand-Diners"
-	$str8 = "TY4iNhGut31cMbE3M6TU5CoCXvFJ5nP59i"
-	$str9 = "12eTGpL8EqYowAfw7DdqmeiZ87R922wt5L"
+    $name = "DanaBot"
+	$str2 = "FROM Win32_NetworkAdapter"
+	$str3 = "FROM moz_cookies"
+	$str4 = "FROM `local_stored_cvc`"
+	$str6 = "FROM Win32_OperatingSystem"
+	$str7 = /DanaBot\_64.+\.pas/
+	
 
 condition:
-  $name and 1 of ($str*)
+  $name or 2 of ($str*)
 	
 }
 

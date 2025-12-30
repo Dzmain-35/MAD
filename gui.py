@@ -3783,7 +3783,22 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             font=Fonts.label
         )
         refresh_btn.pack(side="left", padx=15)
-        
+
+        # Export button
+        export_strings_btn = ctk.CTkButton(
+            filter_row,
+            text="💾 Export",
+            command=lambda: None,  # Will be set later
+            height=30,
+            width=100,
+            fg_color="transparent",
+            hover_color=self.colors["navy"],
+            border_width=2,
+            border_color=self.colors["red"],
+            font=Fonts.label
+        )
+        export_strings_btn.pack(side="left", padx=5)
+
         # Strings text area
         strings_text_frame = ctk.CTkFrame(strings_frame, fg_color="gray20")
         strings_text_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -3832,9 +3847,9 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             length_filtered = [s for s in all_strings_data["strings"] if min_len <= len(s) <= max_len]
 
             if not search_term:
-                # Show all strings (with length filter applied)
+                # Show all strings (with length filter applied) - NO LIMIT like Process Hacker
                 if length_filtered:
-                    display_text = "\n".join(length_filtered[:1000])  # Limit display for performance
+                    display_text = "\n".join(length_filtered)  # Show ALL strings
                     strings_text.insert("1.0", display_text)
                     filter_msg = ""
                     if min_len > 0 or max_len < float('inf'):
@@ -3848,7 +3863,8 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 filtered = [s for s in length_filtered if search_term in s.lower()]
 
                 if filtered:
-                    for s in filtered[:1000]:  # Limit for performance
+                    # Show ALL matches - no limit
+                    for s in filtered:
                         # Highlight search term
                         lower_s = s.lower()
                         start_idx = 0
@@ -3908,11 +3924,11 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 # Get quality filter setting
                 use_quality_filter = quality_filter_var.get()
 
-                # Extract with increased limit for live refresh
+                # Extract ALL strings like Process Hacker (no artificial limits)
                 strings = self.process_monitor.extract_strings_from_process(
                     pid,
                     min_length=extract_min_length,
-                    limit=20000,  # Increased limit for better live refresh
+                    limit=100000,  # High limit to extract all available strings
                     enable_quality_filter=use_quality_filter
                 )
 
@@ -3926,16 +3942,16 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
                 if urls:
                     result_text += f"URLs/Domains ({len(urls)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(urls[:50]) + "\n\n"
+                    result_text += "\n".join(urls) + "\n\n"  # Show ALL URLs
                 if ips:
                     result_text += f"IP Addresses ({len(ips)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(ips[:50]) + "\n\n"
+                    result_text += "\n".join(ips) + "\n\n"  # Show ALL IPs
                 if paths:
                     result_text += f"File Paths ({len(paths)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(paths[:50]) + "\n\n"
+                    result_text += "\n".join(paths) + "\n\n"  # Show ALL paths
                 if others:
                     result_text += f"Other Strings ({len(others)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(others[:200]) + "\n"
+                    result_text += "\n".join(others) + "\n"  # Show ALL other strings
 
                 all_strings_data["strings"] = strings
                 all_strings_data["original_text"] = result_text
@@ -3966,8 +3982,67 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             """Refresh strings by re-extracting from process memory"""
             threading.Thread(target=extract, daemon=True).start()
 
-        # Set refresh button command
+        def export_strings():
+            """Export extracted strings to file"""
+            if not all_strings_data["strings"]:
+                messagebox.showwarning("No Strings", "No strings have been extracted yet. Please wait for extraction to complete.")
+                return
+
+            # Ask user for file format
+            from tkinter import filedialog
+            import json
+            import csv
+
+            file_path = filedialog.asksaveasfilename(
+                title="Export Strings",
+                defaultextension=".txt",
+                filetypes=[
+                    ("Text files", "*.txt"),
+                    ("CSV files", "*.csv"),
+                    ("JSON files", "*.json"),
+                    ("All files", "*.*")
+                ],
+                initialfile=f"strings_pid_{pid}_{name}.txt"
+            )
+
+            if not file_path:
+                return
+
+            try:
+                # Determine format from extension
+                ext = os.path.splitext(file_path)[1].lower()
+
+                if ext == '.json':
+                    # Export as JSON
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump({
+                            'pid': pid,
+                            'process_name': name,
+                            'total_strings': len(all_strings_data["strings"]),
+                            'strings': all_strings_data["strings"]
+                        }, f, indent=2, ensure_ascii=False)
+                elif ext == '.csv':
+                    # Export as CSV
+                    with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(['Index', 'String', 'Length'])
+                        for idx, s in enumerate(all_strings_data["strings"], 1):
+                            writer.writerow([idx, s, len(s)])
+                else:
+                    # Export as plain text (default)
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(f"Process: {name} (PID {pid})\n")
+                        f.write(f"Total Strings: {len(all_strings_data['strings'])}\n")
+                        f.write("="*80 + "\n\n")
+                        f.write("\n".join(all_strings_data["strings"]))
+
+                messagebox.showinfo("Export Successful", f"Exported {len(all_strings_data['strings'])} strings to:\n{file_path}")
+            except Exception as e:
+                messagebox.showerror("Export Failed", f"Failed to export strings: {str(e)}")
+
+        # Set button commands
         refresh_btn.configure(command=refresh_strings)
+        export_strings_btn.configure(command=export_strings)
 
         # Initial extraction
         threading.Thread(target=extract, daemon=True).start()

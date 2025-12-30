@@ -578,7 +578,7 @@ class ProcessMonitor:
         except Exception as e:
             return {"error": str(e)}
     
-    def extract_strings_from_process(self, pid: int, min_length: int = 4, limit: int = 1000, enable_quality_filter: bool = False) -> List[str]:
+    def extract_strings_from_process(self, pid: int, min_length: int = 4, limit: int = 100000, enable_quality_filter: bool = False) -> List[str]:
         """
         Extract printable strings from process memory (ENHANCED VERSION)
 
@@ -624,7 +624,7 @@ class ProcessMonitor:
                 enable_quality_filter=enable_quality_filter  # Use parameter value
             )
 
-            # Combine all string types into a single list
+            # Extract ALL strings without prioritization (like Process Hacker)
             all_strings = []
 
             # FIRST: Add YARA-matched strings at the top (highest priority)
@@ -632,24 +632,10 @@ class ProcessMonitor:
                 print(f"[MemoryExtractor] Including {len(yara_matched_strings)} YARA-matched strings")
                 all_strings.extend(yara_matched_strings)
 
-            # Prioritize interesting strings
-            interesting = self.memory_extractor.get_interesting_strings(results)
-
-            # Add in priority order: suspicious, network, commands, crypto, files
-            priority_order = ['suspicious', 'network', 'commands', 'crypto', 'files']
-            for category in priority_order:
-                all_strings.extend(interesting.get(category, []))
-
-            # Add remaining strings from categorized results
-            # Environment variables are important for malware analysis
-            for str_type in ['environment', 'urls', 'paths', 'ips', 'registry']:
+            # Add ALL strings from ALL categories without prioritization
+            # This ensures we get complete string extraction like Process Hacker
+            for str_type in results['strings'].keys():
                 all_strings.extend(results['strings'].get(str_type, []))
-
-            # Add general ASCII/Unicode strings if we need more
-            if len(all_strings) < limit:
-                remaining = limit - len(all_strings)
-                all_strings.extend(list(results['strings'].get('ascii', []))[:remaining // 2])
-                all_strings.extend(list(results['strings'].get('unicode', []))[:remaining // 2])
 
             # Remove duplicates while preserving order (keep first occurrence)
             seen = set()
@@ -660,9 +646,11 @@ class ProcessMonitor:
                     if (yara_matched_strings and s in yara_matched_strings) or len(s) >= min_length:
                         seen.add(s)
                         unique_strings.append(s)
-                        if len(unique_strings) >= limit:
+                        # Only enforce limit if it's reasonable, otherwise extract all
+                        if limit < 100000 and len(unique_strings) >= limit:
                             break
 
+            print(f"[MemoryExtractor] Extracted {len(unique_strings)} unique strings from PID {pid}")
             return unique_strings
 
         except Exception as e:

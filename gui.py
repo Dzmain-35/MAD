@@ -3799,6 +3799,21 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         )
         export_strings_btn.pack(side="left", padx=5)
 
+        # Show All button (for performance optimization)
+        show_all_btn = ctk.CTkButton(
+            filter_row,
+            text="📊 Show All",
+            command=lambda: None,  # Will be set later
+            height=30,
+            width=100,
+            fg_color="transparent",
+            hover_color=self.colors["navy"],
+            border_width=2,
+            border_color=self.colors["red"],
+            font=Fonts.label
+        )
+        show_all_btn.pack(side="left", padx=5)
+
         # Strings text area
         strings_text_frame = ctk.CTkFrame(strings_frame, fg_color="gray20")
         strings_text_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -3822,8 +3837,13 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         vsb.config(command=strings_text.yview)
         hsb.config(command=strings_text.xview)
         
-        # Store original strings
-        all_strings_data = {"strings": [], "original_text": ""}
+        # Store original strings and display settings
+        all_strings_data = {
+            "strings": [],
+            "original_text": "",
+            "display_limit": 10000,  # Default display limit for performance
+            "show_all": False  # Track if user wants to see all strings
+        }
 
         def search_strings(event=None):
             """Search and highlight strings with length filtering"""
@@ -3847,14 +3867,26 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             length_filtered = [s for s in all_strings_data["strings"] if min_len <= len(s) <= max_len]
 
             if not search_term:
-                # Show all strings (with length filter applied) - NO LIMIT like Process Hacker
+                # Apply smart display limiting for performance
                 if length_filtered:
-                    display_text = "\n".join(length_filtered)  # Show ALL strings
+                    # Determine how many to display
+                    display_limit = None if all_strings_data["show_all"] else all_strings_data["display_limit"]
+                    strings_to_display = length_filtered if display_limit is None else length_filtered[:display_limit]
+
+                    display_text = "\n".join(strings_to_display)
                     strings_text.insert("1.0", display_text)
+
+                    # Build status message
                     filter_msg = ""
                     if min_len > 0 or max_len < float('inf'):
-                        filter_msg = f" (filtered by length: {min_len}-{max_len if max_len != float('inf') else '∞'})"
-                    status_label.configure(text=f"Showing: {len(length_filtered)} strings{filter_msg}")
+                        filter_msg = f" (length: {min_len}-{max_len if max_len != float('inf') else '∞'})"
+
+                    if display_limit and len(length_filtered) > display_limit:
+                        status_label.configure(
+                            text=f"Showing: {len(strings_to_display):,} of {len(length_filtered):,} strings{filter_msg} - Click 'Show All' to see everything"
+                        )
+                    else:
+                        status_label.configure(text=f"Showing: {len(length_filtered):,} strings{filter_msg}")
                 else:
                     strings_text.insert("1.0", "No strings match the length filter")
                     status_label.configure(text="No matches")
@@ -3863,8 +3895,11 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 filtered = [s for s in length_filtered if search_term in s.lower()]
 
                 if filtered:
-                    # Show ALL matches - no limit
-                    for s in filtered:
+                    # Apply smart display limiting for search results too
+                    display_limit = None if all_strings_data["show_all"] else all_strings_data["display_limit"]
+                    results_to_display = filtered if display_limit is None else filtered[:display_limit]
+
+                    for s in results_to_display:
                         # Highlight search term
                         lower_s = s.lower()
                         start_idx = 0
@@ -3884,10 +3919,17 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                             strings_text.tag_add("highlight", tag_start, tag_end)
                             start_idx = pos + len(search_term)
 
+                    # Build status message
                     filter_msg = ""
                     if min_len > 0 or max_len < float('inf'):
                         filter_msg = f" (length: {min_len}-{max_len if max_len != float('inf') else '∞'})"
-                    status_label.configure(text=f"Found: {len(filtered)} matches{filter_msg}")
+
+                    if display_limit and len(filtered) > display_limit:
+                        status_label.configure(
+                            text=f"Found: {len(results_to_display):,} of {len(filtered):,} matches{filter_msg} - Click 'Show All' to see everything"
+                        )
+                    else:
+                        status_label.configure(text=f"Found: {len(filtered):,} matches{filter_msg}")
                 else:
                     strings_text.insert("1.0", f"No strings found matching '{search_term}' with current filters")
                     status_label.configure(text="No matches")
@@ -4040,9 +4082,31 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             except Exception as e:
                 messagebox.showerror("Export Failed", f"Failed to export strings: {str(e)}")
 
+        def toggle_show_all():
+            """Toggle between limited and full display"""
+            all_strings_data["show_all"] = not all_strings_data["show_all"]
+
+            # Update button appearance
+            if all_strings_data["show_all"]:
+                show_all_btn.configure(
+                    text="📉 Show Less",
+                    fg_color=self.colors["red"],
+                    border_width=0
+                )
+            else:
+                show_all_btn.configure(
+                    text="📊 Show All",
+                    fg_color="transparent",
+                    border_width=2
+                )
+
+            # Re-run search to update display
+            search_strings()
+
         # Set button commands
         refresh_btn.configure(command=refresh_strings)
         export_strings_btn.configure(command=export_strings)
+        show_all_btn.configure(command=toggle_show_all)
 
         # Initial extraction
         threading.Thread(target=extract, daemon=True).start()

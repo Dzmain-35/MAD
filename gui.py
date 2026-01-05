@@ -2609,6 +2609,11 @@ class ForensicAnalysisGUI:
     def create_file_card(self, file_info):
         """Create an expandable card for displaying file information"""
         yara_matches = file_info.get("yara_matches", [])
+
+        # DEBUG: Print what we got
+        print(f"[DEBUG] Creating file card for: {file_info.get('filename', 'Unknown')}")
+        print(f"[DEBUG] yara_matches type: {type(yara_matches)}, value: {yara_matches}")
+
         thq_family = file_info.get("thq_family", "Unknown")
         is_whitelisted = file_info.get("whitelisted", False)
         has_threats = len(yara_matches) > 0 or file_info.get("vt_hits", 0) > 0

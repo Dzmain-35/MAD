@@ -2722,8 +2722,8 @@ File Size: {file_info['file_size']} bytes"""
 
         # View Strings button
         def view_strings_click(event):
-            # Get file path from file_info
-            file_path = file_info.get('file_path', '')
+            # Get file path from file_info (stored as 'storage_path')
+            file_path = file_info.get('storage_path', '')
             if file_path and os.path.exists(file_path):
                 self.view_file_strings(file_path, file_info['filename'])
             else:

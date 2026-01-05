@@ -578,7 +578,15 @@ class ProcessMonitor:
         except Exception as e:
             return {"error": str(e)}
     
-    def extract_strings_from_process(self, pid: int, min_length: int = 4, limit: int = 1000, enable_quality_filter: bool = False) -> List[str]:
+    def extract_strings_from_process(
+        self,
+        pid: int,
+        min_length: int = 4,
+        limit: int = 1000,
+        enable_quality_filter: bool = False,
+        scan_mode: str = "quick",
+        progress_callback: Optional[callable] = None
+    ) -> List[str]:
         """
         Extract printable strings from process memory (ENHANCED VERSION)
 
@@ -590,16 +598,32 @@ class ProcessMonitor:
             min_length: Minimum string length
             limit: Maximum number of strings to return
             enable_quality_filter: Enable quality filtering to remove low-quality strings
+            scan_mode: 'quick' (IMAGE regions only) or 'deep' (all regions)
+            progress_callback: Optional callback for progressive updates
 
         Returns:
             List of extracted strings
         """
         if MEMORY_EXTRACTION_AVAILABLE and self.memory_extractor:
-            return self._extract_strings_from_memory(pid, min_length, limit, enable_quality_filter=enable_quality_filter)
+            return self._extract_strings_from_memory(
+                pid, min_length, limit,
+                enable_quality_filter=enable_quality_filter,
+                scan_mode=scan_mode,
+                progress_callback=progress_callback
+            )
         else:
             return self._extract_strings_from_file(pid, min_length, limit)
     
-    def _extract_strings_from_memory(self, pid: int, min_length: int, limit: int, yara_matched_strings: Optional[List[str]] = None, enable_quality_filter: bool = False) -> List[str]:
+    def _extract_strings_from_memory(
+        self,
+        pid: int,
+        min_length: int,
+        limit: int,
+        yara_matched_strings: Optional[List[str]] = None,
+        enable_quality_filter: bool = False,
+        scan_mode: str = "quick",
+        progress_callback: Optional[callable] = None
+    ) -> List[str]:
         """
         Enhanced memory-based string extraction using Windows API
 
@@ -609,6 +633,8 @@ class ProcessMonitor:
             limit: Maximum number of strings
             yara_matched_strings: YARA-matched strings to always include (bypasses filters)
             enable_quality_filter: Enable quality filtering to remove low-quality strings
+            scan_mode: 'quick' (IMAGE regions only) or 'deep' (all regions)
+            progress_callback: Optional callback for progressive updates
         """
         try:
             # Extract strings from process memory with relaxed min_length to catch more
@@ -620,8 +646,10 @@ class ProcessMonitor:
                 min_length=extraction_min_length,
                 max_strings=limit,
                 include_unicode=True,
-                filter_regions=['private', 'image', 'mapped'],  # Scan all region types
-                enable_quality_filter=enable_quality_filter  # Use parameter value
+                filter_regions=None,  # Let scan_mode determine regions
+                enable_quality_filter=enable_quality_filter,
+                scan_mode=scan_mode,
+                progress_callback=progress_callback
             )
 
             # Combine all string types into a single list

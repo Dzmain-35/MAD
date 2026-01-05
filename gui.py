@@ -2719,6 +2719,31 @@ File Size: {file_info['file_size']} bytes"""
         )
         copy_btn.pack(side="top", pady=(0, 5))
         copy_btn.bind("<Button-1>", copy_details)
+
+        # View Strings button
+        def view_strings_click(event):
+            # Get file path from file_info (stored as 'storage_path')
+            file_path = file_info.get('storage_path', '')
+            if file_path and os.path.exists(file_path):
+                self.view_file_strings(file_path, file_info['filename'])
+            else:
+                messagebox.showerror("File Not Found", f"File not found: {file_path}")
+            return "break"
+
+        view_strings_btn = ctk.CTkButton(
+            right_frame,
+            text="📄 View Strings",
+            width=120,
+            height=28,
+            font=Fonts.helper,
+            fg_color="transparent",
+            border_width=2,
+            border_color=self.colors["red"],
+            hover_color=self.colors["navy"],
+            cursor="hand2"
+        )
+        view_strings_btn.pack(side="top", pady=(0, 5))
+        view_strings_btn.bind("<Button-1>", view_strings_click)
         
         # Expand/Collapse indicator
         details_visible = [False]
@@ -3812,18 +3837,48 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         )
         quality_filter_checkbox.pack(side="left", padx=15)
 
-        # Refresh button
-        refresh_btn = ctk.CTkButton(
+        # Quick Scan button (default)
+        quick_scan_btn = ctk.CTkButton(
             filter_row,
-            text="🔄 Refresh Strings",
+            text="⚡ Quick Scan",
             command=lambda: None,  # Will be set later
             height=30,
-            width=140,
+            width=120,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"],
             font=Fonts.label
         )
-        refresh_btn.pack(side="left", padx=15)
+        quick_scan_btn.pack(side="left", padx=5)
+
+        # Deep Scan button
+        deep_scan_btn = ctk.CTkButton(
+            filter_row,
+            text="🔬 Deep Scan",
+            command=lambda: None,  # Will be set later
+            height=30,
+            width=120,
+            fg_color="transparent",
+            hover_color=self.colors["navy"],
+            border_width=2,
+            border_color=self.colors["red"],
+            font=Fonts.label
+        )
+        deep_scan_btn.pack(side="left", padx=5)
+
+        # Export button
+        export_btn = ctk.CTkButton(
+            filter_row,
+            text="💾 Export TXT",
+            command=lambda: None,  # Will be set later
+            height=30,
+            width=120,
+            fg_color="transparent",
+            hover_color=self.colors["navy"],
+            border_width=2,
+            border_color=self.colors["red"],
+            font=Fonts.label
+        )
+        export_btn.pack(side="left", padx=5)
         
         # Strings text area
         strings_text_frame = ctk.CTkFrame(strings_frame, fg_color="gray20")
@@ -3848,8 +3903,8 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         vsb.config(command=strings_text.yview)
         hsb.config(command=strings_text.xview)
         
-        # Store original strings
-        all_strings_data = {"strings": [], "original_text": ""}
+        # Store original strings and extraction result for export
+        all_strings_data = {"strings": [], "original_text": "", "extraction_result": None, "current_mode": "quick"}
 
         def search_strings(event=None):
             """Search and highlight strings with length filtering"""
@@ -3928,20 +3983,35 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         # Re-extract when quality filter changes
         def on_quality_filter_change():
             """Re-extract strings when quality filter setting changes"""
-            threading.Thread(target=extract, daemon=True).start()
+            # Re-extract with current mode
+            threading.Thread(target=lambda: extract(all_strings_data["current_mode"]), daemon=True).start()
 
         quality_filter_checkbox.configure(command=on_quality_filter_change)
-        
-        # Extract strings in background
-        def extract():
-            try:
-                status_label.configure(text="Extracting strings...")
-                refresh_btn.configure(state="disabled", text="🔄 Extracting...")
 
-                # Get minimum length for extraction (use lower value for more strings)
+        # Extract strings in background with progressive loading
+        def extract(scan_mode="quick"):
+            try:
+                # Store current scan mode
+                all_strings_data["current_mode"] = scan_mode
+
+                # Update button states
+                if scan_mode == "quick":
+                    self.root.after(0, lambda: quick_scan_btn.configure(
+                        fg_color=self.colors["red"], text="⚡ Scanning..."))
+                    self.root.after(0, lambda: deep_scan_btn.configure(
+                        fg_color="transparent", text="🔬 Deep Scan"))
+                else:
+                    self.root.after(0, lambda: deep_scan_btn.configure(
+                        fg_color=self.colors["red"], text="🔬 Scanning..."))
+                    self.root.after(0, lambda: quick_scan_btn.configure(
+                        fg_color="transparent", text="⚡ Quick Scan"))
+
+                self.root.after(0, lambda: export_btn.configure(state="disabled"))
+                status_label.configure(text=f"Extracting strings ({scan_mode} mode)...")
+
+                # Get minimum length for extraction
                 try:
                     extract_min_length = int(min_length_entry.get()) if min_length_entry.get() else 4
-                    # Use a lower min_length for extraction to capture more strings
                     extract_min_length = max(4, min(extract_min_length, 10))
                 except ValueError:
                     extract_min_length = 4
@@ -3949,12 +4019,38 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 # Get quality filter setting
                 use_quality_filter = quality_filter_var.get()
 
-                # Extract with increased limit for live refresh
+                # Progressive callback for UI updates
+                def progress_callback(current_strings, regions_total, regions_read, final=False):
+                    """Update UI with progressive results"""
+                    try:
+                        # Flatten strings for display
+                        flat_strings = []
+                        for category_strings in current_strings.values():
+                            if isinstance(category_strings, list):
+                                flat_strings.extend(category_strings)
+
+                        # Update status
+                        status_msg = f"{scan_mode.capitalize()} scan: {len(flat_strings)} strings | {regions_read}/{regions_total} regions"
+                        if final:
+                            status_msg = f"Complete: {len(flat_strings)} strings ({scan_mode} mode)"
+
+                        self.root.after(0, lambda msg=status_msg: status_label.configure(text=msg))
+
+                        # Update display every 10 regions or on final
+                        if final or regions_read % 10 == 0:
+                            all_strings_data["strings"] = flat_strings
+                            self.root.after(0, search_strings)
+                    except Exception as e:
+                        print(f"Progress callback error: {e}")
+
+                # Extract with scan_mode and progressive callback
                 strings = self.process_monitor.extract_strings_from_process(
                     pid,
                     min_length=extract_min_length,
-                    limit=20000,  # Increased limit for better live refresh
-                    enable_quality_filter=use_quality_filter
+                    limit=20000,
+                    enable_quality_filter=use_quality_filter,
+                    scan_mode=scan_mode,
+                    progress_callback=progress_callback
                 )
 
                 result_text = ""
@@ -3981,6 +4077,10 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 all_strings_data["strings"] = strings
                 all_strings_data["original_text"] = result_text
 
+                # Store for export
+                all_strings_data["strings"] = strings
+                all_strings_data["original_text"] = result_text
+
                 # Update UI in main thread
                 filter_status = "Quality Filtered" if use_quality_filter else "All Strings (Unfiltered)"
                 self.root.after(0, lambda: strings_text.configure(state="normal"))
@@ -3988,30 +4088,104 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 self.root.after(0, lambda: strings_text.insert("1.0", result_text))
                 self.root.after(0, lambda: strings_text.configure(state="disabled"))
                 self.root.after(0, lambda: status_label.configure(
-                    text=f"Total: {len(strings)} strings extracted ({filter_status}) | Use filters to refine"
+                    text=f"Complete: {len(strings)} strings ({scan_mode} mode, {filter_status})"
                 ))
-                self.root.after(0, lambda: refresh_btn.configure(state="normal", text="🔄 Refresh Strings"))
+
+                # Restore button states
+                if scan_mode == "quick":
+                    self.root.after(0, lambda: quick_scan_btn.configure(
+                        fg_color=self.colors["red"], text="⚡ Quick Scan"))
+                else:
+                    self.root.after(0, lambda: deep_scan_btn.configure(
+                        fg_color=self.colors["red"], text="🔬 Deep Scan"))
+
+                self.root.after(0, lambda: export_btn.configure(state="normal"))
 
                 # Auto-apply current filters after extraction
                 self.root.after(100, search_strings)
 
             except Exception as e:
+                import traceback
+                traceback.print_exc()
+
                 self.root.after(0, lambda: strings_text.configure(state="normal"))
                 self.root.after(0, lambda: strings_text.delete("1.0", "end"))
                 self.root.after(0, lambda: strings_text.insert("1.0", f"Error: {str(e)}"))
                 self.root.after(0, lambda: strings_text.configure(state="disabled"))
                 self.root.after(0, lambda: status_label.configure(text="Error extracting strings"))
-                self.root.after(0, lambda: refresh_btn.configure(state="normal", text="🔄 Refresh Strings"))
 
-        def refresh_strings():
-            """Refresh strings by re-extracting from process memory"""
-            threading.Thread(target=extract, daemon=True).start()
+                # Restore button states
+                if scan_mode == "quick":
+                    self.root.after(0, lambda: quick_scan_btn.configure(text="⚡ Quick Scan"))
+                else:
+                    self.root.after(0, lambda: deep_scan_btn.configure(text="🔬 Deep Scan"))
 
-        # Set refresh button command
-        refresh_btn.configure(command=refresh_strings)
+                self.root.after(0, lambda: export_btn.configure(state="normal"))
 
-        # Initial extraction
-        threading.Thread(target=extract, daemon=True).start()
+        def export_strings():
+            """Export extracted strings to TXT file"""
+            try:
+                if not all_strings_data["strings"]:
+                    messagebox.showwarning("No Strings", "No strings available to export. Please run a scan first.")
+                    return
+
+                # Ask user for save location
+                from tkinter import filedialog
+                default_name = f"{name}_{pid}_strings_{all_strings_data['current_mode']}.txt"
+                file_path = filedialog.asksaveasfilename(
+                    title="Export Strings",
+                    defaultextension=".txt",
+                    initialfile=default_name,
+                    filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+                )
+
+                if not file_path:
+                    return
+
+                # Create extraction result format for export
+                extraction_result = {
+                    'pid': pid,
+                    'strings': {
+                        'ascii': all_strings_data["strings"],
+                        'unicode': [],
+                        'urls': [s for s in all_strings_data["strings"] if 'http' in s or 'www.' in s],
+                        'paths': [s for s in all_strings_data["strings"] if '\\' in s or '/' in s],
+                        'ips': [s for s in all_strings_data["strings"] if any(c.isdigit() and '.' in s for c in s)],
+                        'registry': [],
+                        'environment': []
+                    },
+                    'scan_mode': all_strings_data['current_mode'],
+                    'memory_regions': [],
+                    'total_bytes_scanned': 0,
+                    'errors': []
+                }
+
+                # Export using memory extractor's export method
+                if hasattr(self.process_monitor, 'memory_extractor'):
+                    success = self.process_monitor.memory_extractor.export_to_txt(
+                        extraction_result,
+                        file_path,
+                        process_name=name
+                    )
+                    if success:
+                        messagebox.showinfo("Export Complete", f"Strings exported to:\n{file_path}")
+                    else:
+                        messagebox.showerror("Export Failed", "Failed to export strings")
+                else:
+                    messagebox.showerror("Export Failed", "Memory extractor not available")
+
+            except Exception as e:
+                messagebox.showerror("Export Error", f"Error exporting strings:\n{str(e)}")
+                import traceback
+                traceback.print_exc()
+
+        # Set button commands
+        quick_scan_btn.configure(command=lambda: threading.Thread(target=lambda: extract("quick"), daemon=True).start())
+        deep_scan_btn.configure(command=lambda: threading.Thread(target=lambda: extract("deep"), daemon=True).start())
+        export_btn.configure(command=export_strings)
+
+        # Initial extraction (Quick Scan by default)
+        threading.Thread(target=lambda: extract("quick"), daemon=True).start()
 
         # ===== LIVE EVENTS TAB =====
         events_frame = ctk.CTkFrame(content_area, fg_color="transparent")
@@ -4327,6 +4501,322 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 toggle_monitoring()
 
         show_tab("info")
+
+    def view_file_strings(self, file_path, file_name):
+        """View extracted strings from a static file in a dedicated window"""
+        # Create window
+        strings_window = ctk.CTkToplevel(self.root)
+        strings_window.title(f"File Strings: {file_name}")
+        strings_window.geometry("1000x700")
+
+        # Main container
+        main_container = ctk.CTkFrame(strings_window, fg_color=self.colors["dark_blue"])
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Header
+        header = ctk.CTkFrame(main_container, fg_color=self.colors["navy"], height=60)
+        header.pack(fill="x", padx=0, pady=(0, 10))
+        header.pack_propagate(False)
+
+        title = ctk.CTkLabel(
+            header,
+            text=f"📄 {file_name}",
+            font=Fonts.logo_subtitle
+        )
+        title.pack(side="left", padx=20, pady=15)
+
+        # Search and filter controls
+        search_frame = ctk.CTkFrame(main_container, fg_color=self.colors["navy"], height=90)
+        search_frame.pack(fill="x", padx=10, pady=10)
+        search_frame.pack_propagate(False)
+
+        # First row: Search
+        search_row = ctk.CTkFrame(search_frame, fg_color="transparent")
+        search_row.pack(fill="x", padx=5, pady=(5, 0))
+
+        search_label = ctk.CTkLabel(
+            search_row,
+            text="🔍 Search:",
+            font=Fonts.body_bold
+        )
+        search_label.pack(side="left", padx=(10, 5))
+
+        search_entry = ctk.CTkEntry(
+            search_row,
+            width=300,
+            height=35,
+            placeholder_text="Enter search term...",
+            font=Fonts.body
+        )
+        search_entry.pack(side="left", padx=5)
+
+        # Status label
+        status_label = ctk.CTkLabel(
+            search_row,
+            text="Extracting strings...",
+            font=Fonts.helper,
+            text_color="gray60"
+        )
+        status_label.pack(side="left", padx=20)
+
+        # Second row: Filters and buttons
+        filter_row = ctk.CTkFrame(search_frame, fg_color="transparent")
+        filter_row.pack(fill="x", padx=5, pady=(5, 5))
+
+        # Length filter
+        length_label = ctk.CTkLabel(
+            filter_row,
+            text="📏 Length:",
+            font=Fonts.body_bold
+        )
+        length_label.pack(side="left", padx=(10, 5))
+
+        min_label = ctk.CTkLabel(
+            filter_row,
+            text="Min:",
+            font=Fonts.helper
+        )
+        min_label.pack(side="left", padx=(5, 2))
+
+        min_length_entry = ctk.CTkEntry(
+            filter_row,
+            width=60,
+            height=30,
+            placeholder_text="4",
+            font=Fonts.helper
+        )
+        min_length_entry.insert(0, "4")
+        min_length_entry.pack(side="left", padx=2)
+
+        max_label = ctk.CTkLabel(
+            filter_row,
+            text="Max:",
+            font=Fonts.helper
+        )
+        max_label.pack(side="left", padx=(10, 2))
+
+        max_length_entry = ctk.CTkEntry(
+            filter_row,
+            width=60,
+            height=30,
+            placeholder_text="∞",
+            font=Fonts.helper
+        )
+        max_length_entry.pack(side="left", padx=2)
+
+        # Quality filter toggle
+        quality_filter_var = ctk.BooleanVar(value=True)
+        quality_filter_checkbox = ctk.CTkCheckBox(
+            filter_row,
+            text="Quality Filter",
+            variable=quality_filter_var,
+            font=Fonts.helper,
+            checkbox_width=20,
+            checkbox_height=20
+        )
+        quality_filter_checkbox.pack(side="left", padx=15)
+
+        # Export button
+        export_btn = ctk.CTkButton(
+            filter_row,
+            text="💾 Export TXT",
+            command=lambda: None,  # Will be set later
+            height=30,
+            width=120,
+            fg_color=self.colors["red"],
+            hover_color=self.colors["red_dark"],
+            font=Fonts.label
+        )
+        export_btn.pack(side="left", padx=5)
+
+        # Strings text area
+        strings_text_frame = ctk.CTkFrame(main_container, fg_color="gray20")
+        strings_text_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        vsb = tk.Scrollbar(strings_text_frame, orient="vertical", bg="#1a1a1a")
+        vsb.pack(side="right", fill="y")
+
+        hsb = tk.Scrollbar(strings_text_frame, orient="horizontal", bg="#1a1a1a")
+        hsb.pack(side="bottom", fill="x")
+
+        strings_text = tk.Text(
+            strings_text_frame,
+            wrap="none",
+            bg="#1a1a1a",
+            fg="#ffffff",
+            font=Fonts.monospace(10),
+            yscrollcommand=vsb.set,
+            xscrollcommand=hsb.set
+        )
+        strings_text.pack(side="left", fill="both", expand=True, padx=2, pady=2)
+        vsb.config(command=strings_text.yview)
+        hsb.config(command=strings_text.xview)
+
+        # Store extraction data
+        extraction_data = {"strings": [], "extraction_result": None}
+
+        def search_strings(event=None):
+            """Search and filter strings"""
+            search_term = search_entry.get().strip().lower()
+
+            # Get length filter
+            try:
+                min_len = int(min_length_entry.get()) if min_length_entry.get() else 0
+            except ValueError:
+                min_len = 0
+
+            try:
+                max_len = int(max_length_entry.get()) if max_length_entry.get() else float('inf')
+            except ValueError:
+                max_len = float('inf')
+
+            strings_text.configure(state="normal")
+            strings_text.delete("1.0", "end")
+
+            # Apply length filter
+            length_filtered = [s for s in extraction_data["strings"] if min_len <= len(s) <= max_len]
+
+            if not search_term:
+                if length_filtered:
+                    display_text = "\n".join(length_filtered[:5000])  # Limit for performance
+                    strings_text.insert("1.0", display_text)
+                    filter_msg = ""
+                    if min_len > 0 or max_len < float('inf'):
+                        filter_msg = f" (filtered by length: {min_len}-{max_len if max_len != float('inf') else '∞'})"
+                    status_label.configure(text=f"Showing: {len(length_filtered)} strings{filter_msg}")
+                else:
+                    strings_text.insert("1.0", "No strings match the filters")
+                    status_label.configure(text="No matches")
+            else:
+                # Filter by search term
+                filtered = [s for s in length_filtered if search_term in s.lower()]
+
+                if filtered:
+                    for s in filtered[:5000]:
+                        strings_text.insert("end", s + "\n")
+                    filter_msg = ""
+                    if min_len > 0 or max_len < float('inf'):
+                        filter_msg = f" (length: {min_len}-{max_len if max_len != float('inf') else '∞'})"
+                    status_label.configure(text=f"Found: {len(filtered)} matches{filter_msg}")
+                else:
+                    strings_text.insert("1.0", f"No strings found matching '{search_term}'")
+                    status_label.configure(text="No matches")
+
+            strings_text.configure(state="disabled")
+
+        search_entry.bind("<KeyRelease>", search_strings)
+        min_length_entry.bind("<KeyRelease>", search_strings)
+        max_length_entry.bind("<KeyRelease>", search_strings)
+
+        def extract_file_strings():
+            """Extract strings from file in background"""
+            try:
+                status_label.configure(text="Extracting strings from file...")
+                export_btn.configure(state="disabled")
+
+                # Import file string extractor
+                import sys
+                import os
+                sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'analysis_modules'))
+                from file_string_extractor import FileStringExtractor
+
+                extractor = FileStringExtractor(verbose=True)
+
+                # Get settings
+                use_quality_filter = quality_filter_var.get()
+
+                # Progress callback
+                def progress_callback(bytes_processed, total_bytes, current_strings):
+                    pct = (bytes_processed / total_bytes * 100) if total_bytes > 0 else 0
+                    self.root.after(0, lambda: status_label.configure(
+                        text=f"Extracting: {pct:.0f}% ({current_strings} strings so far...)"
+                    ))
+
+                # Extract strings
+                result = extractor.extract_strings_from_file(
+                    file_path,
+                    min_length=4,
+                    max_strings=50000,
+                    include_unicode=True,
+                    enable_quality_filter=use_quality_filter,
+                    progress_callback=progress_callback,
+                    scan_mode="quick"
+                )
+
+                # Combine all strings
+                all_strings = []
+                for category, strings in result['strings'].items():
+                    all_strings.extend(strings)
+
+                extraction_data["strings"] = all_strings
+                extraction_data["extraction_result"] = result
+
+                # Update UI
+                self.root.after(0, lambda: status_label.configure(
+                    text=f"Complete: {len(all_strings)} strings extracted in {result.get('extraction_time', 0):.2f}s"
+                ))
+                self.root.after(0, lambda: export_btn.configure(state="normal"))
+                self.root.after(0, search_strings)
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.root.after(0, lambda: status_label.configure(text=f"Error: {str(e)}"))
+                self.root.after(0, lambda: strings_text.configure(state="normal"))
+                self.root.after(0, lambda: strings_text.delete("1.0", "end"))
+                self.root.after(0, lambda: strings_text.insert("1.0", f"Error extracting strings:\n{str(e)}"))
+                self.root.after(0, lambda: strings_text.configure(state="disabled"))
+                self.root.after(0, lambda: export_btn.configure(state="normal"))
+
+        def export_file_strings():
+            """Export strings to TXT file"""
+            try:
+                if not extraction_data["extraction_result"]:
+                    messagebox.showwarning("No Data", "No strings available to export")
+                    return
+
+                from tkinter import filedialog
+                default_name = f"{os.path.splitext(file_name)[0]}_strings.txt"
+                save_path = filedialog.asksaveasfilename(
+                    title="Export Strings",
+                    defaultextension=".txt",
+                    initialfile=default_name,
+                    filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+                )
+
+                if not save_path:
+                    return
+
+                # Import file string extractor
+                import sys
+                import os
+                sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'analysis_modules'))
+                from file_string_extractor import FileStringExtractor
+
+                extractor = FileStringExtractor()
+                success = extractor.export_to_txt(
+                    extraction_data["extraction_result"],
+                    save_path,
+                    include_metadata=True
+                )
+
+                if success:
+                    messagebox.showinfo("Export Complete", f"Strings exported to:\n{save_path}")
+                else:
+                    messagebox.showerror("Export Failed", "Failed to export strings")
+
+            except Exception as e:
+                messagebox.showerror("Export Error", f"Error exporting:\n{str(e)}")
+                import traceback
+                traceback.print_exc()
+
+        # Set button commands
+        export_btn.configure(command=export_file_strings)
+        quality_filter_checkbox.configure(command=lambda: threading.Thread(target=extract_file_strings, daemon=True).start())
+
+        # Start initial extraction
+        import threading
+        threading.Thread(target=extract_file_strings, daemon=True).start()
 
     def open_folder_location(self):
         """Open the folder containing the selected process's executable"""

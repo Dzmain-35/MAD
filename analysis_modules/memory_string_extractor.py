@@ -133,7 +133,9 @@ class MemoryStringExtractor:
         include_unicode: bool = True,
         filter_regions: Optional[List[str]] = None,
         enable_quality_filter: bool = True,
-        use_cache: bool = True
+        use_cache: bool = True,
+        scan_mode: str = "quick",
+        progress_callback: Optional[callable] = None
     ) -> Dict[str, any]:
         """
         Extract strings from process memory regions
@@ -144,18 +146,28 @@ class MemoryStringExtractor:
             max_strings: Maximum number of strings to extract
             include_unicode: Include Unicode strings
             filter_regions: List of region types to scan ['private', 'image', 'mapped']
-                          If None, scans all readable regions
+                          If None, defaults based on scan_mode
             enable_quality_filter: Enable quality filtering to remove low-quality strings
                                  (entropy, vowel ratio, repetition, truncation checks)
             use_cache: Use cached results if available and within TTL
+            scan_mode: 'quick' (IMAGE regions only, ~1-3 sec) or 'deep' (all regions, slower)
+            progress_callback: Optional callback(current_strings, total_regions, regions_scanned)
+                             for progressive updates
 
         Returns:
             Dictionary containing extracted strings and metadata
         """
+        # Set default filter_regions based on scan_mode
+        if filter_regions is None:
+            if scan_mode == "quick":
+                filter_regions = ['image']  # Quick scan: only executable regions
+            else:  # deep scan
+                filter_regions = ['private', 'image', 'mapped']  # Deep scan: all regions
+
         # Create cache key based on parameters
         cache_key = (pid, min_length, max_strings, include_unicode,
                      tuple(filter_regions) if filter_regions else None,
-                     enable_quality_filter)
+                     enable_quality_filter, scan_mode)
 
         # Check cache if enabled
         if use_cache and cache_key in self.cache:
@@ -164,7 +176,7 @@ class MemoryStringExtractor:
 
             if age < self.cache_ttl:
                 if self.verbose:
-                    print(f"[MemoryExtractor] Using cached results for PID {pid} (age: {age:.1f}s)")
+                    print(f"[MemoryExtractor] Using cached results for PID {pid} (age: {age:.1f}s, mode: {scan_mode})")
                 # Return a copy to prevent modifications
                 return {
                     'pid': cached_result['pid'],
@@ -173,7 +185,8 @@ class MemoryStringExtractor:
                     'total_bytes_scanned': cached_result['total_bytes_scanned'],
                     'errors': cached_result['errors'][:],
                     'cached': True,
-                    'cache_age': age
+                    'cache_age': age,
+                    'scan_mode': scan_mode
                 }
 
         result = {
@@ -190,11 +203,9 @@ class MemoryStringExtractor:
             'memory_regions': [],
             'total_bytes_scanned': 0,
             'errors': [],
-            'cached': False
+            'cached': False,
+            'scan_mode': scan_mode
         }
-
-        if filter_regions is None:
-            filter_regions = ['private', 'image', 'mapped']
         
         try:
             # Multi-tiered process access strategy
@@ -256,7 +267,10 @@ class MemoryStringExtractor:
                 regions_read = 0
 
                 if self.verbose:
-                    print(f"[MemoryExtractor] Starting memory scan for PID {pid}...")
+                    print(f"[MemoryExtractor] Starting memory scan for PID {pid} ({scan_mode} mode)...")
+
+                # Track progress for callback
+                callback_interval = 5  # Call callback every N regions
 
                 while address < max_address:
                     mbi = MEMORY_BASIC_INFORMATION()
@@ -301,8 +315,19 @@ class MemoryStringExtractor:
                                 enable_quality_filter
                             )
 
-                            # Stop if we've collected enough strings
+                            # Progressive callback for UI updates
                             total_strings = sum(len(s) for s in result['strings'].values())
+                            if progress_callback and regions_read % callback_interval == 0:
+                                try:
+                                    # Convert sets to lists for callback
+                                    current_strings = {k: sorted(list(v))[:max_strings]
+                                                     for k, v in result['strings'].items()}
+                                    progress_callback(current_strings, regions_scanned, regions_read)
+                                except Exception as e:
+                                    if self.verbose:
+                                        print(f"[MemoryExtractor] Callback error: {e}")
+
+                            # Stop if we've collected enough strings
                             if total_strings >= max_strings:
                                 if self.verbose:
                                     print(f"[MemoryExtractor] Reached max strings limit ({max_strings})")
@@ -326,7 +351,17 @@ class MemoryStringExtractor:
                     print(f"[MemoryExtractor] Total bytes scanned: {result['total_bytes_scanned']:,}")
                     total_strings = sum(len(s) for s in result['strings'].values())
                     print(f"[MemoryExtractor] Total strings extracted: {total_strings}")
-            
+
+                # Final callback with complete results
+                if progress_callback:
+                    try:
+                        current_strings = {k: sorted(list(v))[:max_strings]
+                                         for k, v in result['strings'].items()}
+                        progress_callback(current_strings, regions_scanned, regions_read, final=True)
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"[MemoryExtractor] Final callback error: {e}")
+
             finally:
                 CloseHandle(h_process)
         
@@ -845,6 +880,130 @@ class MemoryStringExtractor:
             interesting[key] = interesting[key][:50]
         
         return interesting
+
+    def export_to_txt(
+        self,
+        extraction_result: Dict,
+        output_path: str,
+        process_name: str = "",
+        include_metadata: bool = True
+    ) -> bool:
+        """
+        Export extracted strings to a text file (Option B format)
+
+        Args:
+            extraction_result: Result from extract_strings_from_memory()
+            output_path: Path to output TXT file
+            process_name: Name of the process (optional)
+            include_metadata: Include header with metadata
+
+        Returns:
+            True if successful
+        """
+        try:
+            from datetime import datetime
+
+            with open(output_path, 'w', encoding='utf-8') as f:
+                if include_metadata:
+                    # Header with metadata
+                    f.write("=" * 80 + "\n")
+                    if process_name:
+                        f.write(f"Process: {process_name} (PID {extraction_result['pid']})\n")
+                    else:
+                        f.write(f"Process PID: {extraction_result['pid']}\n")
+
+                    f.write(f"Extracted: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Scan Mode: {extraction_result.get('scan_mode', 'N/A')}\n")
+
+                    total_strings = sum(len(s) for s in extraction_result['strings'].values())
+                    f.write(f"Total Strings: {total_strings:,}\n")
+
+                    f.write(f"Memory Regions Scanned: {len(extraction_result.get('memory_regions', []))}\n")
+                    f.write(f"Total Bytes Scanned: {extraction_result.get('total_bytes_scanned', 0):,}\n")
+
+                    if extraction_result.get('cached'):
+                        f.write(f"Cached: Yes (age: {extraction_result.get('cache_age', 0):.1f}s)\n")
+
+                    f.write("=" * 80 + "\n\n")
+
+                # Write categorized strings
+                strings_data = extraction_result['strings']
+
+                # URLs
+                if strings_data.get('urls') and len(strings_data['urls']) > 0:
+                    f.write(f"URLS ({len(strings_data['urls'])}):\n")
+                    f.write("-" * 80 + "\n")
+                    for s in strings_data['urls']:
+                        f.write(f"{s}\n")
+                    f.write("\n")
+
+                # IPs
+                if strings_data.get('ips') and len(strings_data['ips']) > 0:
+                    f.write(f"IP ADDRESSES ({len(strings_data['ips'])}):\n")
+                    f.write("-" * 80 + "\n")
+                    for s in strings_data['ips']:
+                        f.write(f"{s}\n")
+                    f.write("\n")
+
+                # Paths
+                if strings_data.get('paths') and len(strings_data['paths']) > 0:
+                    f.write(f"FILE PATHS ({len(strings_data['paths'])}):\n")
+                    f.write("-" * 80 + "\n")
+                    for s in strings_data['paths']:
+                        f.write(f"{s}\n")
+                    f.write("\n")
+
+                # Registry
+                if strings_data.get('registry') and len(strings_data['registry']) > 0:
+                    f.write(f"REGISTRY KEYS ({len(strings_data['registry'])}):\n")
+                    f.write("-" * 80 + "\n")
+                    for s in strings_data['registry']:
+                        f.write(f"{s}\n")
+                    f.write("\n")
+
+                # Environment
+                if strings_data.get('environment') and len(strings_data['environment']) > 0:
+                    f.write(f"ENVIRONMENT VARIABLES ({len(strings_data['environment'])}):\n")
+                    f.write("-" * 80 + "\n")
+                    for s in strings_data['environment']:
+                        f.write(f"{s}\n")
+                    f.write("\n")
+
+                # All ASCII strings
+                if strings_data.get('ascii') and len(strings_data['ascii']) > 0:
+                    f.write(f"ASCII STRINGS ({len(strings_data['ascii'])}):\n")
+                    f.write("-" * 80 + "\n")
+                    for s in strings_data['ascii']:
+                        f.write(f"{s}\n")
+                    f.write("\n")
+
+                # All Unicode strings
+                if strings_data.get('unicode') and len(strings_data['unicode']) > 0:
+                    f.write(f"UNICODE STRINGS ({len(strings_data['unicode'])}):\n")
+                    f.write("-" * 80 + "\n")
+                    for s in strings_data['unicode']:
+                        f.write(f"{s}\n")
+                    f.write("\n")
+
+                # Errors if any
+                if extraction_result.get('errors'):
+                    f.write(f"ERRORS/WARNINGS:\n")
+                    f.write("-" * 80 + "\n")
+                    for error in extraction_result['errors']:
+                        f.write(f"{error}\n")
+                    f.write("\n")
+
+            if self.verbose:
+                print(f"[MemoryExtractor] Exported strings to {output_path}")
+
+            return True
+
+        except Exception as e:
+            if self.verbose:
+                print(f"[MemoryExtractor] Export error: {e}")
+                import traceback
+                traceback.print_exc()
+            return False
 
 
 # Testing function

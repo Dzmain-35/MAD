@@ -71,6 +71,11 @@ class ForensicAnalysisGUI:
         self.pid_to_tree_item = {}  # Track PIDs to tree item IDs for incremental updates
         self.process_tree_initial_load = True  # Track if this is the first process list load
 
+        # YARA popup limiting (to reduce alert fatigue)
+        self.popup_count_by_rule = {}  # Track popup count per YARA rule family
+        self.max_popups_per_rule = 3   # Limit popups to 3 per rule family
+        self.total_yara_matches = 0    # Total YARA matches for badge display
+
         # Procmon live monitors (PID -> monitor instance)
         self.procmon_monitors = {}
 
@@ -843,6 +848,19 @@ class ForensicAnalysisGUI:
             button_hover_color=self.colors["dark_blue"]
         )
         self.process_filter_dropdown.pack(side="left", padx=5)
+
+        # YARA match counter badge
+        self.yara_match_badge = ctk.CTkLabel(
+            search_frame,
+            text="⚠️ YARA: 0",
+            font=("Segoe UI", 13, "bold"),
+            text_color="#fbbf24",  # Amber color
+            fg_color="#78350f",     # Dark amber background
+            corner_radius=6,
+            padx=12,
+            pady=6
+        )
+        self.yara_match_badge.pack(side="left", padx=(15, 5))
 
         # Process tree area with parent-child hierarchy
         tree_frame = ctk.CTkFrame(frame, fg_color="gray20")
@@ -3121,6 +3139,63 @@ File Size: {file_info['file_size']} bytes"""
         if self.process_tree_initial_load:
             self.process_tree_initial_load = False
 
+    def should_show_popup(self, rule_name):
+        """
+        Determine if a popup should be shown for this YARA rule.
+        Limits popups to max_popups_per_rule per rule family to reduce alert fatigue.
+        Returns True if popup should be shown, False if limit reached.
+        """
+        if not rule_name or rule_name == 'No_YARA_Hit':
+            return False
+
+        # Get current count for this rule
+        count = self.popup_count_by_rule.get(rule_name, 0)
+
+        if count < self.max_popups_per_rule:
+            # Increment counter and show popup
+            self.popup_count_by_rule[rule_name] = count + 1
+            return True
+        else:
+            # Limit reached, suppress popup
+            print(f"ℹ️  Popup suppressed for {rule_name} (limit: {self.max_popups_per_rule} per rule)")
+            return False
+
+    def update_yara_match_badge(self):
+        """
+        Update the YARA match counter badge with current count and color coding.
+        Color scheme: yellow (1-10), orange (11-25), red (26+)
+        """
+        count = self.total_yara_matches
+
+        # Update text
+        self.yara_match_badge.configure(text=f"⚠️ YARA: {count}")
+
+        # Color code based on count
+        if count == 0:
+            # Gray for no matches
+            self.yara_match_badge.configure(
+                text_color="#9ca3af",
+                fg_color="#374151"
+            )
+        elif count <= 10:
+            # Yellow for low count
+            self.yara_match_badge.configure(
+                text_color="#fbbf24",
+                fg_color="#78350f"
+            )
+        elif count <= 25:
+            # Orange for medium count
+            self.yara_match_badge.configure(
+                text_color="#fb923c",
+                fg_color="#7c2d12"
+            )
+        else:
+            # Red for high count
+            self.yara_match_badge.configure(
+                text_color="#f87171",
+                fg_color="#7f1d1d"
+            )
+
     def filter_processes(self):
         """Filter processes by PID or Name, showing matching processes and all their children"""
         search_text = self.process_search_entry.get().strip().lower()
@@ -3343,6 +3418,19 @@ File Size: {file_info['file_size']} bytes"""
 
                 # If threats detected, show red warning popup like live scan
                 if matches_found and rule != 'No_YARA_Hit':
+                    # Increment total YARA match count
+                    self.total_yara_matches += 1
+
+                    # Update the badge display
+                    self.root.after(0, self.update_yara_match_badge)
+
+                    # Check if we should show popup (limits to 3 per rule family)
+                    if not self.should_show_popup(rule):
+                        # Popup suppressed, but match still counted and visible in filter
+                        # Refresh list to show the match
+                        self.root.after(0, self.refresh_process_list)
+                        return
+
                     def show_threat_alert():
                         # Get process info for the alert
                         try:
@@ -4896,6 +4984,17 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             threat_score = scan_results.get('threat_score', 0)
             risk_level = scan_results.get('risk_level', 'Unknown')
             strings = scan_results.get('strings', [])
+
+            # Increment total YARA match count
+            self.total_yara_matches += 1
+
+            # Update the badge display
+            self.root.after(0, self.update_yara_match_badge)
+
+            # Check if we should show popup (limits to 3 per rule family)
+            if not self.should_show_popup(rule):
+                # Popup suppressed, but match still counted and visible in filter
+                return
 
             # Show alert in GUI thread
             def show_alert():

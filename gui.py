@@ -76,6 +76,9 @@ class ForensicAnalysisGUI:
         self.max_popups_per_rule = 3   # Limit popups to 3 per rule family
         self.total_yara_matches = 0    # Total YARA matches for badge display
 
+        # Tree rebuild flag (to prevent marking all processes as "new" during filter changes)
+        self.rebuilding_tree_for_filter = False
+
         # Procmon live monitors (PID -> monitor instance)
         self.procmon_monitors = {}
 
@@ -2933,9 +2936,9 @@ File Size: {file_info['file_size']} bytes"""
         dead_pids = existing_pids - current_pids
         potentially_updated_pids = current_pids & existing_pids
 
-        # Only mark as "new" (yellow highlight) if this is not the initial load
-        if self.process_tree_initial_load:
-            new_pids = set()  # Don't highlight any as new on initial load
+        # Only mark as "new" (yellow highlight) if this is not the initial load AND not a filter rebuild
+        if self.process_tree_initial_load or self.rebuilding_tree_for_filter:
+            new_pids = set()  # Don't highlight any as new on initial load or filter rebuild
         else:
             new_pids = pids_to_add  # After initial load, newly added PIDs are truly new
 
@@ -3207,7 +3210,10 @@ File Size: {file_info['file_size']} bytes"""
             for item in self.process_tree.get_children():
                 self.process_tree.delete(item)
             self.pid_to_tree_item.clear()
+            # Set flag to prevent marking all processes as "new" during rebuild
+            self.rebuilding_tree_for_filter = True
             self.refresh_process_list()
+            self.rebuilding_tree_for_filter = False
             return
 
         # Get all processes
@@ -3293,6 +3299,9 @@ File Size: {file_info['file_size']} bytes"""
                     matches = proc.get('yara_matches', 0)
                     yara_status = f"⚠️ {matches} matches" if matches else "⚠️ YES"
                 tags = ('threat',)
+            elif proc.get('whitelisted', False):
+                yara_status = "✅ BENIGN"
+                tags = ('benign',)
             elif name.lower() in ['system', 'smss.exe', 'csrss.exe', 'wininit.exe', 'services.exe']:
                 tags = ('system',)
 

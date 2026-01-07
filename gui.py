@@ -4131,15 +4131,19 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                     except Exception as e:
                         print(f"Progress callback error: {e}")
 
-                # Extract with scan_mode and progressive callback
-                strings = self.process_monitor.extract_strings_from_process(
+                # Extract with scan_mode and progressive callback - get full result with metadata
+                extraction_result = self.process_monitor.extract_strings_from_process(
                     pid,
                     min_length=extract_min_length,
                     limit=20000,
                     enable_quality_filter=use_quality_filter,
                     scan_mode=scan_mode,
-                    progress_callback=progress_callback
+                    progress_callback=progress_callback,
+                    return_full_result=True  # Get full result with metadata
                 )
+
+                # Extract strings list from result
+                strings = extraction_result.get('strings', [])
 
                 result_text = ""
 
@@ -4162,12 +4166,10 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                     result_text += f"Other Strings ({len(others)}):\n" + "="*80 + "\n"
                     result_text += "\n".join(others[:200]) + "\n"
 
+                # Store strings and full extraction result for export
                 all_strings_data["strings"] = strings
                 all_strings_data["original_text"] = result_text
-
-                # Store for export
-                all_strings_data["strings"] = strings
-                all_strings_data["original_text"] = result_text
+                all_strings_data["extraction_result"] = extraction_result  # Store full result with metadata
 
                 # Update UI in main thread
                 filter_status = "Quality Filtered" if use_quality_filter else "All Strings (Unfiltered)"
@@ -4230,33 +4232,62 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 if not file_path:
                     return
 
-                # Create extraction result format for export
-                extraction_result = {
-                    'pid': pid,
-                    'strings': {
-                        'ascii': all_strings_data["strings"],
-                        'unicode': [],
-                        'urls': [s for s in all_strings_data["strings"] if 'http' in s or 'www.' in s],
-                        'paths': [s for s in all_strings_data["strings"] if '\\' in s or '/' in s],
-                        'ips': [s for s in all_strings_data["strings"] if any(c.isdigit() and '.' in s for c in s)],
-                        'registry': [],
-                        'environment': []
-                    },
-                    'scan_mode': all_strings_data['current_mode'],
-                    'memory_regions': [],
-                    'total_bytes_scanned': 0,
-                    'errors': []
-                }
+                # Use the real extraction result if available, otherwise create one
+                if "extraction_result" in all_strings_data and all_strings_data["extraction_result"]:
+                    extraction_result = all_strings_data["extraction_result"]
+
+                    # Ensure it has the proper format for export
+                    # The memory extractor expects 'strings' to be a dict of categories
+                    if isinstance(extraction_result.get('strings'), list):
+                        # Convert from list format to categorized format
+                        strings_list = extraction_result['strings']
+                        extraction_result['strings'] = {
+                            'ascii': strings_list,
+                            'unicode': [],
+                            'urls': [s for s in strings_list if 'http' in s or 'www.' in s],
+                            'paths': [s for s in strings_list if '\\' in s or '/' in s],
+                            'ips': [s for s in strings_list if any(c.isdigit() and '.' in s for c in s)],
+                            'registry': [],
+                            'environment': []
+                        }
+
+                    # Add PID if not present
+                    extraction_result['pid'] = pid
+                else:
+                    # Fallback: create extraction result from strings
+                    extraction_result = {
+                        'pid': pid,
+                        'strings': {
+                            'ascii': all_strings_data["strings"],
+                            'unicode': [],
+                            'urls': [s for s in all_strings_data["strings"] if 'http' in s or 'www.' in s],
+                            'paths': [s for s in all_strings_data["strings"] if '\\' in s or '/' in s],
+                            'ips': [s for s in all_strings_data["strings"] if any(c.isdigit() and '.' in s for c in s)],
+                            'registry': [],
+                            'environment': []
+                        },
+                        'scan_mode': all_strings_data['current_mode'],
+                        'memory_regions': [],
+                        'total_bytes_scanned': 0,
+                        'errors': ['Export created without full extraction metadata']
+                    }
 
                 # Export using memory extractor's export method
-                if hasattr(self.process_monitor, 'memory_extractor'):
+                if hasattr(self.process_monitor, 'memory_extractor') and self.process_monitor.memory_extractor:
                     success = self.process_monitor.memory_extractor.export_to_txt(
                         extraction_result,
                         file_path,
                         process_name=name
                     )
                     if success:
-                        messagebox.showinfo("Export Complete", f"Strings exported to:\n{file_path}")
+                        # Show summary including metadata
+                        mem_regions = len(extraction_result.get('memory_regions', []))
+                        bytes_scanned = extraction_result.get('total_bytes_scanned', 0)
+                        summary = f"Strings exported to:\n{file_path}\n\n"
+                        summary += f"Memory Regions Scanned: {mem_regions}\n"
+                        summary += f"Total Bytes Scanned: {bytes_scanned:,}\n"
+                        summary += f"Extraction Method: {extraction_result.get('extraction_method', 'unknown')}"
+                        messagebox.showinfo("Export Complete", summary)
                     else:
                         messagebox.showerror("Export Failed", "Failed to export strings")
                 else:

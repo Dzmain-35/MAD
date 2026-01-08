@@ -585,8 +585,9 @@ class ProcessMonitor:
         limit: int = 1000,
         enable_quality_filter: bool = False,
         scan_mode: str = "quick",
-        progress_callback: Optional[callable] = None
-    ) -> List[str]:
+        progress_callback: Optional[callable] = None,
+        return_full_result: bool = False
+    ) -> Dict:
         """
         Extract printable strings from process memory (ENHANCED VERSION)
 
@@ -600,19 +601,33 @@ class ProcessMonitor:
             enable_quality_filter: Enable quality filtering to remove low-quality strings
             scan_mode: 'quick' (IMAGE regions only) or 'deep' (all regions)
             progress_callback: Optional callback for progressive updates
+            return_full_result: Return full extraction result dict instead of just strings list
 
         Returns:
-            List of extracted strings
+            Dictionary with 'strings' list and metadata (memory_regions, total_bytes_scanned, etc.)
         """
         if MEMORY_EXTRACTION_AVAILABLE and self.memory_extractor:
             return self._extract_strings_from_memory(
                 pid, min_length, limit,
                 enable_quality_filter=enable_quality_filter,
                 scan_mode=scan_mode,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                return_full_result=return_full_result
             )
         else:
-            return self._extract_strings_from_file(pid, min_length, limit)
+            # Fallback to file-based extraction
+            strings = self._extract_strings_from_file(pid, min_length, limit)
+            if return_full_result:
+                return {
+                    'strings': strings,
+                    'memory_regions': [],
+                    'total_bytes_scanned': 0,
+                    'scan_mode': scan_mode,
+                    'extraction_method': 'file',
+                    'errors': ['Memory extraction not available - using file-based fallback']
+                }
+            else:
+                return {'strings': strings}
     
     def _extract_strings_from_memory(
         self,
@@ -622,8 +637,9 @@ class ProcessMonitor:
         yara_matched_strings: Optional[List[str]] = None,
         enable_quality_filter: bool = False,
         scan_mode: str = "quick",
-        progress_callback: Optional[callable] = None
-    ) -> List[str]:
+        progress_callback: Optional[callable] = None,
+        return_full_result: bool = False
+    ) -> Dict:
         """
         Enhanced memory-based string extraction using Windows API
 
@@ -635,6 +651,10 @@ class ProcessMonitor:
             enable_quality_filter: Enable quality filtering to remove low-quality strings
             scan_mode: 'quick' (IMAGE regions only) or 'deep' (all regions)
             progress_callback: Optional callback for progressive updates
+            return_full_result: Return full extraction result dict instead of just strings list
+
+        Returns:
+            Dictionary with 'strings' list and optional metadata
         """
         try:
             # Extract strings from process memory with relaxed min_length to catch more
@@ -691,12 +711,38 @@ class ProcessMonitor:
                         if len(unique_strings) >= limit:
                             break
 
-            return unique_strings
+            # Return full result or just strings
+            if return_full_result:
+                # Return full extraction result with metadata
+                return {
+                    'strings': unique_strings,
+                    'memory_regions': results.get('memory_regions', []),
+                    'total_bytes_scanned': results.get('total_bytes_scanned', 0),
+                    'scan_mode': scan_mode,
+                    'extraction_method': 'memory',
+                    'errors': results.get('errors', []),
+                    'cached': results.get('cached', False),
+                    'access_level': results.get('access_level', 'unknown')
+                }
+            else:
+                # Backward compatibility - just return strings list wrapped in dict
+                return {'strings': unique_strings}
 
         except Exception as e:
             print(f"Error in memory-based string extraction for PID {pid}: {e}")
             # Fallback to file-based extraction
-            return self._extract_strings_from_file(pid, min_length, limit)
+            strings = self._extract_strings_from_file(pid, min_length, limit)
+            if return_full_result:
+                return {
+                    'strings': strings,
+                    'memory_regions': [],
+                    'total_bytes_scanned': 0,
+                    'scan_mode': scan_mode,
+                    'extraction_method': 'file_fallback',
+                    'errors': [f'Memory extraction failed: {str(e)}']
+                }
+            else:
+                return {'strings': strings}
     
     def _extract_strings_from_file(self, pid: int, min_length: int, limit: int) -> List[str]:
         """

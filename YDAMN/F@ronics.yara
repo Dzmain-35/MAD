@@ -10,7 +10,7 @@ rule Mal_Faronics_Deploy_RAT
 		$str3 = "faronics.com"
 		$str4 = "Faronics Corporation"
 		$str5 = "Faronics Deploy Agent"
-		$str5 = "C:\Program Files (x86)\Faronics"
+		$str5 = "C:\\Program Files (x86)\\Faronics"
         $ip1 = "52.41.91.1"
     condition:
         any of them

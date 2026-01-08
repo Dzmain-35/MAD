@@ -3203,11 +3203,23 @@ File Size: {file_info['file_size']} bytes"""
 
         # If no filters applied, refresh to show all
         if not search_text and filter_choice == "All Processes":
+            # Mark that we're doing a filter clear rebuild - don't highlight as new
+            # Store current PIDs to preserve history
+            known_pids_before_clear = set(self.pid_to_tree_item.keys())
+
             # Clear the tree to ensure full rebuild when switching from filtered to unfiltered view
             for item in self.process_tree.get_children():
                 self.process_tree.delete(item)
             self.pid_to_tree_item.clear()
+
+            # Temporarily set initial load flag to prevent yellow highlighting during rebuild
+            was_initial_load = self.process_tree_initial_load
+            self.process_tree_initial_load = True
+
             self.refresh_process_list()
+
+            # Restore the flag immediately after refresh
+            self.process_tree_initial_load = was_initial_load
             return
 
         # Get all processes

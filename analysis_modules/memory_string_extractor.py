@@ -200,6 +200,7 @@ class MemoryStringExtractor:
                 'registry': set(),
                 'environment': set(),
             },
+            'strings_by_region': [],  # NEW: List of {region_info, strings} for Process Hacker style output
             'memory_regions': [],
             'total_bytes_scanned': 0,
             'errors': [],
@@ -306,7 +307,7 @@ class MemoryStringExtractor:
                             regions_read += 1
                             result['total_bytes_scanned'] += len(memory_data)
 
-                            # Extract strings from memory data
+                            # Extract strings from memory data (for backward compatibility)
                             self._extract_strings_from_buffer(
                                 memory_data,
                                 result['strings'],
@@ -314,6 +315,22 @@ class MemoryStringExtractor:
                                 include_unicode,
                                 enable_quality_filter
                             )
+
+                            # NEW: Extract strings for this specific region (Process Hacker style)
+                            region_strings = self._extract_strings_from_buffer_simple(
+                                memory_data,
+                                min_length,
+                                include_unicode,
+                                enable_quality_filter
+                            )
+
+                            # Store strings with their region info
+                            if region_strings:
+                                result['strings_by_region'].append({
+                                    'region': region_info.copy(),
+                                    'strings': region_strings,
+                                    'string_count': len(region_strings)
+                                })
 
                             # Progressive callback for UI updates
                             total_strings = sum(len(s) for s in result['strings'].values())
@@ -625,6 +642,66 @@ class MemoryStringExtractor:
         elif string.startswith('HKEY_') or string.startswith('HKLM\\') or string.startswith('HKCU\\'):
             string_dict['registry'].add(string)
 
+    def _extract_strings_from_buffer_simple(
+        self,
+        data: bytes,
+        min_length: int,
+        include_unicode: bool,
+        enable_quality_filter: bool = True
+    ) -> List[str]:
+        """
+        Extract strings from buffer without categorization (Process Hacker style)
+        Returns a simple list of all strings found in this memory buffer
+
+        Args:
+            data: Memory buffer
+            min_length: Minimum string length
+            include_unicode: Whether to extract Unicode strings
+            enable_quality_filter: Whether to apply quality filtering
+
+        Returns:
+            List of strings found in this buffer
+        """
+        if not data:
+            return []
+
+        strings = []
+
+        # Extract ASCII strings
+        if min_length == 4:
+            ascii_pattern = self.string_patterns['ascii']
+        else:
+            pattern = rb'[\x20-\x7E]{' + str(min_length).encode() + rb',}'
+            ascii_pattern = re.compile(pattern)
+
+        for match in ascii_pattern.finditer(data):
+            try:
+                string = match.group().decode('ascii', errors='ignore')
+                if len(string) >= min_length:
+                    if not enable_quality_filter or self._is_quality_string(string, min_length):
+                        strings.append(string)
+            except Exception:
+                continue
+
+        # Extract Unicode strings (UTF-16LE)
+        if include_unicode:
+            if min_length == 4:
+                unicode_pattern = self.string_patterns['unicode']
+            else:
+                unicode_pattern = rb'(?:[\x20-\x7E]\x00){' + str(min_length).encode() + rb',}'
+                unicode_pattern = re.compile(unicode_pattern)
+
+            for match in unicode_pattern.finditer(data):
+                try:
+                    string = match.group().decode('utf-16le', errors='ignore')
+                    if len(string) >= min_length:
+                        if not enable_quality_filter or self._is_quality_string(string, min_length):
+                            strings.append(string)
+                except Exception:
+                    continue
+
+        return strings
+
     def _calculate_entropy(self, string: str) -> float:
         """
         Calculate Shannon entropy of a string
@@ -926,64 +1003,70 @@ class MemoryStringExtractor:
 
                     f.write("=" * 80 + "\n\n")
 
-                # Write categorized strings
-                strings_data = extraction_result['strings']
+                # Write strings grouped by memory region (Process Hacker style)
+                strings_by_region = extraction_result.get('strings_by_region', [])
 
-                # URLs
-                if strings_data.get('urls') and len(strings_data['urls']) > 0:
-                    f.write(f"URLS ({len(strings_data['urls'])}):\n")
-                    f.write("-" * 80 + "\n")
-                    for s in strings_data['urls']:
-                        f.write(f"{s}\n")
-                    f.write("\n")
+                if strings_by_region:
+                    f.write("STRINGS BY MEMORY REGION (Process Hacker Style)\n")
+                    f.write("=" * 80 + "\n\n")
 
-                # IPs
-                if strings_data.get('ips') and len(strings_data['ips']) > 0:
-                    f.write(f"IP ADDRESSES ({len(strings_data['ips'])}):\n")
-                    f.write("-" * 80 + "\n")
-                    for s in strings_data['ips']:
-                        f.write(f"{s}\n")
-                    f.write("\n")
+                    for region_data in strings_by_region:
+                        region = region_data['region']
+                        strings = region_data['strings']
 
-                # Paths
-                if strings_data.get('paths') and len(strings_data['paths']) > 0:
-                    f.write(f"FILE PATHS ({len(strings_data['paths'])}):\n")
-                    f.write("-" * 80 + "\n")
-                    for s in strings_data['paths']:
-                        f.write(f"{s}\n")
-                    f.write("\n")
+                        # Format region header
+                        base_addr = region['base']
+                        size_bytes = region['size']
+                        region_type = region['type'].upper()
+                        protection = region['protection']
 
-                # Registry
-                if strings_data.get('registry') and len(strings_data['registry']) > 0:
-                    f.write(f"REGISTRY KEYS ({len(strings_data['registry'])}):\n")
-                    f.write("-" * 80 + "\n")
-                    for s in strings_data['registry']:
-                        f.write(f"{s}\n")
-                    f.write("\n")
+                        # Calculate end address
+                        if base_addr.startswith('0x'):
+                            end_addr = hex(int(base_addr, 16) + size_bytes)
+                        else:
+                            end_addr = hex(int(base_addr) + size_bytes)
 
-                # Environment
-                if strings_data.get('environment') and len(strings_data['environment']) > 0:
-                    f.write(f"ENVIRONMENT VARIABLES ({len(strings_data['environment'])}):\n")
-                    f.write("-" * 80 + "\n")
-                    for s in strings_data['environment']:
-                        f.write(f"{s}\n")
-                    f.write("\n")
+                        f.write(f"Memory Region: {base_addr} - {end_addr} ({size_bytes:,} bytes)\n")
+                        f.write(f"Type: {region_type}  |  Protection: {protection}\n")
+                        f.write(f"Strings Found: {len(strings)}\n")
+                        f.write("-" * 80 + "\n")
 
-                # All ASCII strings
-                if strings_data.get('ascii') and len(strings_data['ascii']) > 0:
-                    f.write(f"ASCII STRINGS ({len(strings_data['ascii'])}):\n")
-                    f.write("-" * 80 + "\n")
-                    for s in strings_data['ascii']:
-                        f.write(f"{s}\n")
-                    f.write("\n")
+                        # Write strings from this region
+                        for string in strings[:500]:  # Limit to 500 strings per region
+                            f.write(f"{string}\n")
 
-                # All Unicode strings
-                if strings_data.get('unicode') and len(strings_data['unicode']) > 0:
-                    f.write(f"UNICODE STRINGS ({len(strings_data['unicode'])}):\n")
-                    f.write("-" * 80 + "\n")
-                    for s in strings_data['unicode']:
-                        f.write(f"{s}\n")
-                    f.write("\n")
+                        if len(strings) > 500:
+                            f.write(f"... and {len(strings) - 500} more strings\n")
+
+                        f.write("\n")
+
+                else:
+                    # Fallback: Use old categorized format if strings_by_region is not available
+                    f.write("STRINGS (Legacy Format)\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write("Note: strings_by_region data not available, using legacy categorized format\n\n")
+
+                    strings_data = extraction_result['strings']
+
+                    # All ASCII strings
+                    if strings_data.get('ascii') and len(strings_data['ascii']) > 0:
+                        f.write(f"ASCII STRINGS ({len(strings_data['ascii'])}):\n")
+                        f.write("-" * 80 + "\n")
+                        for s in list(strings_data['ascii'])[:1000]:
+                            f.write(f"{s}\n")
+                        if len(strings_data['ascii']) > 1000:
+                            f.write(f"... and {len(strings_data['ascii']) - 1000} more\n")
+                        f.write("\n")
+
+                    # All Unicode strings
+                    if strings_data.get('unicode') and len(strings_data['unicode']) > 0:
+                        f.write(f"UNICODE STRINGS ({len(strings_data['unicode'])}):\n")
+                        f.write("-" * 80 + "\n")
+                        for s in list(strings_data['unicode'])[:1000]:
+                            f.write(f"{s}\n")
+                        if len(strings_data['unicode']) > 1000:
+                            f.write(f"... and {len(strings_data['unicode']) - 1000} more\n")
+                        f.write("\n")
 
                 # Errors if any
                 if extraction_result.get('errors'):

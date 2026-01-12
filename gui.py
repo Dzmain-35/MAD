@@ -950,7 +950,16 @@ class ForensicAnalysisGUI:
         )
         self.process_context_menu.add_separator(background="#444444")
         self.process_context_menu.add_command(
-            label="❌ Kill Process", 
+            label="⏸️ Suspend Process",
+            command=self.suspend_selected_process
+        )
+        self.process_context_menu.add_command(
+            label="▶️ Resume Process",
+            command=self.resume_selected_process
+        )
+        self.process_context_menu.add_separator(background="#444444")
+        self.process_context_menu.add_command(
+            label="❌ Kill Process",
             command=self.kill_selected_process
         )
         
@@ -962,6 +971,7 @@ class ForensicAnalysisGUI:
         self.process_tree.tag_configure('new', background='#8B7500', foreground='white')  # Gold for new processes
         self.process_tree.tag_configure('benign', background='#1a4d2e', foreground='white')  # Green for whitelisted/benign
         self.process_tree.tag_configure('system', foreground='#888888')
+        self.process_tree.tag_configure('suspended', background='#3a3a3a', foreground='#808080')  # Grey for suspended processes
         
         self.analysis_subtabs["processes"] = frame
         
@@ -2762,7 +2772,31 @@ File Size: {file_info['file_size']} bytes"""
         )
         view_strings_btn.pack(side="top", pady=(0, 5))
         view_strings_btn.bind("<Button-1>", view_strings_click)
-        
+
+        # CyberChef button
+        def open_in_cyberchef(event):
+            file_path = file_info.get('storage_path', '')
+            if file_path and os.path.exists(file_path):
+                self.open_file_in_cyberchef(file_path, file_info['filename'])
+            else:
+                messagebox.showerror("File Not Found", f"File not found: {file_path}")
+            return "break"
+
+        cyberchef_btn = ctk.CTkButton(
+            right_frame,
+            text="🔬 CyberChef",
+            width=120,
+            height=28,
+            font=Fonts.helper,
+            fg_color="transparent",
+            border_width=2,
+            border_color="#FF8C00",
+            hover_color=self.colors["navy"],
+            cursor="hand2"
+        )
+        cyberchef_btn.pack(side="top", pady=(0, 5))
+        cyberchef_btn.bind("<Button-1>", open_in_cyberchef)
+
         # Expand/Collapse indicator
         details_visible = [False]
         details_frame = ctk.CTkFrame(card_frame, fg_color="#0d1520", height=200)
@@ -2989,10 +3023,22 @@ File Size: {file_info['file_size']} bytes"""
                 # Check if YARA status changed
                 current_values = self.process_tree.item(item_id, 'values')
 
+                # Check if process is suspended
+                is_suspended = False
+                try:
+                    import psutil
+                    process_status = psutil.Process(pid).status()
+                    is_suspended = process_status == psutil.STATUS_STOPPED
+                except:
+                    pass
+
                 # Determine new YARA status
                 yara_status = "No"
                 tags = ()
-                if proc.get('threat_detected'):
+                if is_suspended:
+                    yara_status = "⏸️ SUSPENDED"
+                    tags = ('suspended',)
+                elif proc.get('threat_detected'):
                     yara_rule = proc.get('yara_rule', 'Unknown')
                     if yara_rule and yara_rule != 'Unknown':
                         # Check if there are multiple rules
@@ -3059,10 +3105,22 @@ File Size: {file_info['file_size']} bytes"""
                 name = proc['name']
                 exe = proc.get('exe', 'N/A')
 
+                # Check if process is suspended
+                is_suspended = False
+                try:
+                    import psutil
+                    process_status = psutil.Process(pid).status()
+                    is_suspended = process_status == psutil.STATUS_STOPPED
+                except:
+                    pass
+
                 # Determine YARA match status
                 yara_status = "No"
                 tags = ()
-                if proc.get('threat_detected'):
+                if is_suspended:
+                    yara_status = "⏸️ SUSPENDED"
+                    tags = ('suspended',)
+                elif proc.get('threat_detected'):
                     yara_rule = proc.get('yara_rule', 'Unknown')
                     if yara_rule and yara_rule != 'Unknown':
                         # Check if there are multiple rules
@@ -4949,6 +5007,60 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         import threading
         threading.Thread(target=extract_file_strings, daemon=True).start()
 
+    def open_file_in_cyberchef(self, file_path, file_name):
+        """Open file contents in CyberChef for analysis"""
+        try:
+            import base64
+            import webbrowser
+            import urllib.parse
+
+            # Check file size - warn if too large
+            file_size = os.path.getsize(file_path)
+            max_size = 10 * 1024 * 1024  # 10 MB limit for CyberChef
+
+            if file_size > max_size:
+                response = messagebox.askyesno(
+                    "Large File Warning",
+                    f"File size is {file_size / (1024*1024):.2f} MB.\n\n"
+                    f"Large files may cause browser issues in CyberChef.\n"
+                    f"Recommended maximum: 10 MB\n\n"
+                    f"Continue anyway?"
+                )
+                if not response:
+                    return
+
+            # Read and encode file
+            with open(file_path, 'rb') as f:
+                file_data = f.read()
+
+            # Base64 encode
+            encoded_data = base64.b64encode(file_data).decode('ascii')
+
+            # Create CyberChef URL
+            # The URL format loads the data directly into CyberChef
+            cyberchef_url = f"https://gchq.github.io/CyberChef/#recipe=From_Base64('A-Za-z0-9%2B/%3D',true,false)&input={urllib.parse.quote(encoded_data)}"
+
+            # Check if URL is too long (browsers have URL length limits)
+            if len(cyberchef_url) > 50000:
+                # For very large files, just open CyberChef without data
+                messagebox.showwarning(
+                    "File Too Large",
+                    f"File is too large to load directly into CyberChef via URL.\n\n"
+                    f"Opening CyberChef where you can manually load the file:\n{file_path}"
+                )
+                webbrowser.open("https://gchq.github.io/CyberChef/")
+            else:
+                # Open CyberChef with the encoded file data
+                webbrowser.open(cyberchef_url)
+                messagebox.showinfo(
+                    "CyberChef Opened",
+                    f"File '{file_name}' has been opened in CyberChef in your default browser.\n\n"
+                    f"The file is loaded as base64-encoded data."
+                )
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open file in CyberChef: {str(e)}")
+
     def open_folder_location(self):
         """Open the folder containing the selected process's executable"""
         selection = self.process_tree.selection()
@@ -4993,12 +5105,12 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         if not selection:
             messagebox.showwarning("No Selection", "Please select a process to kill")
             return
-        
+
         item = self.process_tree.item(selection[0])
         pid = int(item['values'][0])
         name = item['values'][1]
-        
-        if messagebox.askyesno("Confirm Kill", 
+
+        if messagebox.askyesno("Confirm Kill",
                               f"Are you sure you want to kill process {name} (PID {pid})?"):
             success = self.process_monitor.kill_process(pid)
             if success:
@@ -5006,7 +5118,45 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 self.refresh_process_list()
             else:
                 messagebox.showerror("Error", f"Failed to kill process {pid}")
-    
+
+    def suspend_selected_process(self):
+        """Suspend/pause selected process"""
+        selection = self.process_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a process to suspend")
+            return
+
+        item = self.process_tree.item(selection[0])
+        pid = int(item['values'][0])
+        name = item['values'][1]
+
+        if messagebox.askyesno("Confirm Suspend",
+                              f"Are you sure you want to suspend process {name} (PID {pid})?"):
+            success = self.process_monitor.suspend_process(pid)
+            if success:
+                messagebox.showinfo("Success", f"Process {pid} suspended")
+                self.refresh_process_list()
+            else:
+                messagebox.showerror("Error", f"Failed to suspend process {pid}")
+
+    def resume_selected_process(self):
+        """Resume suspended process"""
+        selection = self.process_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a process to resume")
+            return
+
+        item = self.process_tree.item(selection[0])
+        pid = int(item['values'][0])
+        name = item['values'][1]
+
+        success = self.process_monitor.resume_process(pid)
+        if success:
+            messagebox.showinfo("Success", f"Process {pid} resumed")
+            self.refresh_process_list()
+        else:
+            messagebox.showerror("Error", f"Failed to resume process {pid}")
+
     # FIXED: Added proper null checks for callback
     def on_new_process_detected(self, proc_info):
         """Callback when new process is detected"""

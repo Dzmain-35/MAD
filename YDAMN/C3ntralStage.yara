@@ -8,9 +8,10 @@ strings:
     $str1 = "CentraStage" nocase
 	$str2 = "CentraStage.Cag" nocase
 	$str3 = "CagService.exe" nocase
-	$str4 = "rmm.datto.com"
-	str5 = "Datto RMM Agent"
-	$domain2 = "vidal-monitoring.centrastage.net"
+	$str4 = "datto" nocase
+	$str5 = "Datto RMM Agent"
+	$domain1 = "vidal-monitoring.centrastage.net"
+	$domain2 = "rmm.datto.com"
 
 condition:
   any of them

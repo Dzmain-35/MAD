@@ -10,7 +10,8 @@ strings:
 	$domain1 = "wishpeople.duckdns.org"
 	$hex1 = "57 53 48 52 41 54"
 condition:
-	any of them
+	2 of them
 }
+
 
 

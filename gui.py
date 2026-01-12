@@ -949,8 +949,9 @@ class ForensicAnalysisGUI:
             command=self.open_folder_location
         )
         self.process_context_menu.add_separator(background="#444444")
+        # Note: Suspend/Resume will be added dynamically in show_process_context_menu
         self.process_context_menu.add_command(
-            label="❌ Kill Process", 
+            label="❌ Kill Process",
             command=self.kill_selected_process
         )
         
@@ -962,6 +963,7 @@ class ForensicAnalysisGUI:
         self.process_tree.tag_configure('new', background='#8B7500', foreground='white')  # Gold for new processes
         self.process_tree.tag_configure('benign', background='#1a4d2e', foreground='white')  # Green for whitelisted/benign
         self.process_tree.tag_configure('system', foreground='#888888')
+        self.process_tree.tag_configure('suspended', background='#3a3a3a', foreground='#808080')  # Grey for suspended processes
         
         self.analysis_subtabs["processes"] = frame
         
@@ -2762,7 +2764,7 @@ File Size: {file_info['file_size']} bytes"""
         )
         view_strings_btn.pack(side="top", pady=(0, 5))
         view_strings_btn.bind("<Button-1>", view_strings_click)
-        
+
         # Expand/Collapse indicator
         details_visible = [False]
         details_frame = ctk.CTkFrame(card_frame, fg_color="#0d1520", height=200)
@@ -2989,10 +2991,22 @@ File Size: {file_info['file_size']} bytes"""
                 # Check if YARA status changed
                 current_values = self.process_tree.item(item_id, 'values')
 
+                # Check if process is suspended
+                is_suspended = False
+                try:
+                    import psutil
+                    process_status = psutil.Process(pid).status()
+                    is_suspended = process_status == psutil.STATUS_STOPPED
+                except:
+                    pass
+
                 # Determine new YARA status
                 yara_status = "No"
                 tags = ()
-                if proc.get('threat_detected'):
+                if is_suspended:
+                    yara_status = "⏸️ SUSPENDED"
+                    tags = ('suspended',)
+                elif proc.get('threat_detected'):
                     yara_rule = proc.get('yara_rule', 'Unknown')
                     if yara_rule and yara_rule != 'Unknown':
                         # Check if there are multiple rules
@@ -3059,10 +3073,22 @@ File Size: {file_info['file_size']} bytes"""
                 name = proc['name']
                 exe = proc.get('exe', 'N/A')
 
+                # Check if process is suspended
+                is_suspended = False
+                try:
+                    import psutil
+                    process_status = psutil.Process(pid).status()
+                    is_suspended = process_status == psutil.STATUS_STOPPED
+                except:
+                    pass
+
                 # Determine YARA match status
                 yara_status = "No"
                 tags = ()
-                if proc.get('threat_detected'):
+                if is_suspended:
+                    yara_status = "⏸️ SUSPENDED"
+                    tags = ('suspended',)
+                elif proc.get('threat_detected'):
                     yara_rule = proc.get('yara_rule', 'Unknown')
                     if yara_rule and yara_rule != 'Unknown':
                         # Check if there are multiple rules
@@ -3375,6 +3401,52 @@ File Size: {file_info['file_size']} bytes"""
     def show_process_context_menu(self, event):
         """Show right-click context menu for processes"""
         try:
+            # Get selected process
+            selection = self.process_tree.selection()
+            if not selection:
+                return
+
+            # Check if process is suspended
+            item = self.process_tree.item(selection[0])
+            pid = int(item['values'][0])
+            is_suspended = False
+
+            try:
+                import psutil
+                process_status = psutil.Process(pid).status()
+                is_suspended = process_status == psutil.STATUS_STOPPED
+            except:
+                pass
+
+            # Remove any existing suspend/resume entries
+            # The menu structure is: Scan, View Details, Open Folder, Separator, [Suspend/Resume], Kill
+            # So suspend/resume would be at index 4 (after separator at 3)
+            menu_length = self.process_context_menu.index('end')
+            if menu_length is not None and menu_length >= 4:
+                # Check if there's a suspend or resume entry
+                try:
+                    label = self.process_context_menu.entrycget(4, 'label')
+                    if '⏸️' in label or '▶️' in label:
+                        self.process_context_menu.delete(4)
+                except:
+                    pass
+
+            # Add appropriate menu item
+            if is_suspended:
+                # Show Resume option
+                self.process_context_menu.insert_command(
+                    4,
+                    label="▶️ Resume Process",
+                    command=self.resume_selected_process
+                )
+            else:
+                # Show Suspend option
+                self.process_context_menu.insert_command(
+                    4,
+                    label="⏸️ Suspend Process",
+                    command=self.suspend_selected_process
+                )
+
             self.process_context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.process_context_menu.grab_release()
@@ -4993,12 +5065,12 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         if not selection:
             messagebox.showwarning("No Selection", "Please select a process to kill")
             return
-        
+
         item = self.process_tree.item(selection[0])
         pid = int(item['values'][0])
         name = item['values'][1]
-        
-        if messagebox.askyesno("Confirm Kill", 
+
+        if messagebox.askyesno("Confirm Kill",
                               f"Are you sure you want to kill process {name} (PID {pid})?"):
             success = self.process_monitor.kill_process(pid)
             if success:
@@ -5006,7 +5078,42 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 self.refresh_process_list()
             else:
                 messagebox.showerror("Error", f"Failed to kill process {pid}")
-    
+
+    def suspend_selected_process(self):
+        """Suspend/pause selected process"""
+        selection = self.process_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a process to suspend")
+            return
+
+        item = self.process_tree.item(selection[0])
+        pid = int(item['values'][0])
+        name = item['values'][1]
+
+        success = self.process_monitor.suspend_process(pid)
+        if success:
+            self.refresh_process_list()
+        else:
+            messagebox.showerror("Error", f"Failed to suspend process {pid}")
+
+    def resume_selected_process(self):
+        """Resume suspended process"""
+        selection = self.process_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a process to resume")
+            return
+
+        item = self.process_tree.item(selection[0])
+        pid = int(item['values'][0])
+        name = item['values'][1]
+
+        success = self.process_monitor.resume_process(pid)
+        if success:
+            messagebox.showinfo("Success", f"Process {pid} resumed")
+            self.refresh_process_list()
+        else:
+            messagebox.showerror("Error", f"Failed to resume process {pid}")
+
     # FIXED: Added proper null checks for callback
     def on_new_process_detected(self, proc_info):
         """Callback when new process is detected"""

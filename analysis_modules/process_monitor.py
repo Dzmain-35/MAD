@@ -917,10 +917,10 @@ class ProcessMonitor:
     def kill_process(self, pid: int) -> bool:
         """
         Terminate a process
-        
+
         Args:
             pid: Process ID to kill
-            
+
         Returns:
             True if successful
         """
@@ -941,7 +941,45 @@ class ProcessMonitor:
         except Exception as e:
             print(f"Error killing process {pid}: {e}")
             return False
-    
+
+    def suspend_process(self, pid: int) -> bool:
+        """
+        Suspend/pause a process
+
+        Args:
+            pid: Process ID to suspend
+
+        Returns:
+            True if successful
+        """
+        try:
+            proc = psutil.Process(pid)
+            proc.suspend()
+            print(f"Process {pid} suspended successfully")
+            return True
+        except Exception as e:
+            print(f"Error suspending process {pid}: {e}")
+            return False
+
+    def resume_process(self, pid: int) -> bool:
+        """
+        Resume a suspended process
+
+        Args:
+            pid: Process ID to resume
+
+        Returns:
+            True if successful
+        """
+        try:
+            proc = psutil.Process(pid)
+            proc.resume()
+            print(f"Process {pid} resumed successfully")
+            return True
+        except Exception as e:
+            print(f"Error resuming process {pid}: {e}")
+            return False
+
     def register_process_callback(self, callback: Callable):
         """
         Register a callback for new processes

@@ -305,6 +305,11 @@ class CaseManager:
         file_size = os.path.getsize(dest_path)
         print(f"File size: {file_size} bytes")
 
+        # Detect file type
+        print("Detecting file type...")
+        file_type = self.detect_file_type(dest_path)
+        print(f"  File Type: {file_type}")
+
         # Scan with YARA
         yara_matches = self.scan_with_yara(dest_path)
 
@@ -340,6 +345,7 @@ class CaseManager:
             "imphash": imphash,
             "ssdeep": ssdeep,
             "file_size": file_size,
+            "file_type": file_type,
             "whitelisted": is_whitelisted,
             "yara_matches": yara_matches,
             "vt_hits": vt_hits,
@@ -359,6 +365,97 @@ class CaseManager:
         
         return file_info
     
+    def detect_file_type(self, file_path: str) -> str:
+        """
+        Detect the actual file type using magic bytes
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            String describing the file type
+        """
+        try:
+            with open(file_path, 'rb') as f:
+                header = f.read(32)  # Read first 32 bytes for magic number detection
+
+            if len(header) < 2:
+                return "Empty or invalid file"
+
+            # PE/EXE/DLL detection
+            if header[:2] == b'MZ':
+                # Read PE header to determine if it's EXE or DLL
+                try:
+                    import pefile
+                    pe = pefile.PE(file_path)
+                    if pe.is_dll():
+                        return "PE32 DLL (Windows)"
+                    elif pe.is_exe():
+                        return "PE32 EXE (Windows)"
+                    else:
+                        return "PE32 (Windows)"
+                except:
+                    return "PE/DOS executable"
+
+            # Image formats
+            if header[:8] == b'\x89PNG\r\n\x1a\n':
+                return "PNG image"
+            if header[:2] == b'\xff\xd8' and header[6:10] in (b'JFIF', b'Exif'):
+                return "JPEG image"
+            if header[:6] in (b'GIF87a', b'GIF89a'):
+                return "GIF image"
+            if header[:2] in (b'BM', b'BA', b'CI', b'CP', b'IC', b'PT'):
+                return "BMP image"
+
+            # Archive formats
+            if header[:4] == b'PK\x03\x04' or header[:4] == b'PK\x05\x06' or header[:4] == b'PK\x07\x08':
+                return "ZIP archive"
+            if header[:2] == b'\x1f\x8b':
+                return "GZIP archive"
+            if header[:7] == b'Rar!\x1a\x07\x00' or header[:7] == b'Rar!\x1a\x07\x01':
+                return "RAR archive"
+            if header[:6] == b'7z\xbc\xaf\x27\x1c':
+                return "7-Zip archive"
+
+            # Document formats
+            if header[:4] == b'%PDF':
+                return "PDF document"
+            if header[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+                return "Microsoft Office document (OLE2)"
+            if header[:4] == b'PK\x03\x04':
+                # Could be Office Open XML format
+                return "ZIP/Office Open XML"
+
+            # Script/text formats
+            if header[:2] == b'#!':
+                return "Shell script"
+            if header[:5] == b'<?xml':
+                return "XML document"
+            if header[:5] == b'<html' or header[:6] == b'<!DOCT':
+                return "HTML document"
+
+            # ELF binary (Linux)
+            if header[:4] == b'\x7fELF':
+                return "ELF executable (Linux)"
+
+            # Mach-O binary (macOS)
+            if header[:4] in (b'\xfe\xed\xfa\xce', b'\xfe\xed\xfa\xcf', b'\xce\xfa\xed\xfe', b'\xcf\xfa\xed\xfe'):
+                return "Mach-O executable (macOS)"
+
+            # Check if it's likely a text file
+            try:
+                header.decode('utf-8')
+                # If we can decode it, it's likely text
+                return "Text file"
+            except UnicodeDecodeError:
+                pass
+
+            # Unknown binary
+            return "Unknown binary data"
+
+        except Exception as e:
+            return f"Error detecting type: {str(e)}"
+
     def calculate_hashes(self, file_path: str) -> tuple:
         """
         Calculate MD5, SHA256, IMPHASH, and SSDEEP for a file
@@ -892,6 +989,7 @@ MD5: {file_info['md5']}
 SHA256: {file_info['sha256']}
 File Size: {file_info['file_size']} bytes
 ==================================================================
+File Type: {file_info.get('file_type', 'Unknown')}
 IMPHASH: {file_info.get('imphash', 'N/A')}
 SSDEEP: {file_info.get('ssdeep', 'N/A')}
 ==================================================================

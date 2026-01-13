@@ -18,6 +18,8 @@ import tkinter as tk
 from tkinter import ttk
 import re
 from typography import Fonts
+from yara_rule_manager import YaraRuleManager
+from settings_manager import SettingsManager
 
 class ForensicAnalysisGUI:
     def __init__(self):
@@ -55,7 +57,11 @@ class ForensicAnalysisGUI:
         )
         
         self.network_monitor = NetworkMonitor()
-        
+
+        # Initialize YARA rule manager and settings manager
+        self.yara_rule_manager = YaraRuleManager(self.case_manager.yara_rules_path)
+        self.settings_manager = SettingsManager()
+
         # Register callbacks for real-time updates
         self.process_monitor.register_process_callback(self.on_new_process_detected)
         self.network_monitor.register_connection_callback(self.on_new_connection_detected)
@@ -120,6 +126,8 @@ class ForensicAnalysisGUI:
         self.create_new_case_tab()
         self.create_current_case_tab()
         self.create_analysis_tab()
+        self.create_yara_rules_tab()
+        self.create_settings_tab()
 
         # Show initial tab
         self.show_tab("new_case")
@@ -167,6 +175,30 @@ class ForensicAnalysisGUI:
             corner_radius=8
         )
         self.btn_analysis.pack(fill="x", pady=5)
+
+        self.btn_yara_rules = ctk.CTkButton(
+            nav_frame, text="YARA Rules",
+            command=lambda: self.show_tab("yara_rules"),
+            height=45, font=Fonts.label_large,
+            fg_color="transparent",
+            hover_color=self.colors["navy"],
+            border_width=2,
+            border_color=self.colors["navy"],
+            corner_radius=8
+        )
+        self.btn_yara_rules.pack(fill="x", pady=5)
+
+        self.btn_settings = ctk.CTkButton(
+            nav_frame, text="Settings",
+            command=lambda: self.show_tab("settings"),
+            height=45, font=Fonts.label_large,
+            fg_color="transparent",
+            hover_color=self.colors["navy"],
+            border_width=2,
+            border_color=self.colors["navy"],
+            corner_radius=8
+        )
+        self.btn_settings.pack(fill="x", pady=5)
         
     # ==================== NEW CASE TAB ====================
     def create_new_case_tab(self):
@@ -1901,6 +1933,16 @@ class ForensicAnalysisGUI:
             border_width=2,
             border_color=self.colors["navy"]
         )
+        self.btn_yara_rules.configure(
+            fg_color="transparent",
+            border_width=2,
+            border_color=self.colors["navy"]
+        )
+        self.btn_settings.configure(
+            fg_color="transparent",
+            border_width=2,
+            border_color=self.colors["navy"]
+        )
 
         # Show selected tab
         self.tabs[tab_name].pack(fill="both", expand=True)
@@ -1919,6 +1961,17 @@ class ForensicAnalysisGUI:
             self.update_current_case_display()
         elif tab_name == "analysis":
             self.btn_analysis.configure(
+                fg_color=self.colors["navy"],
+                border_width=0
+            )
+        elif tab_name == "yara_rules":
+            self.btn_yara_rules.configure(
+                fg_color=self.colors["navy"],
+                border_width=0
+            )
+            self.refresh_yara_rules_list()
+        elif tab_name == "settings":
+            self.btn_settings.configure(
                 fg_color=self.colors["navy"],
                 border_width=0
             )
@@ -2865,7 +2918,622 @@ File Size: {file_info['file_size']} bytes"""
 
         text_widget.configure(state="disabled")  # Make read-only
         text_widget.pack(fill="both", expand=True)
-    
+
+    # ==================== YARA RULES TAB ====================
+    def create_yara_rules_tab(self):
+        """Create the YARA Rules Management tab"""
+        frame = ctk.CTkFrame(self.content_area, fg_color=self.colors["dark_blue"])
+        self.tabs["yara_rules"] = frame
+
+        # Header
+        header_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        header_frame.pack(fill="x", padx=20, pady=20)
+
+        title = ctk.CTkLabel(header_frame, text="YARA Rules Management",
+                            font=Fonts.header_subsection,
+                            text_color="white")
+        title.pack(side="left")
+
+        # Action buttons
+        btn_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        btn_frame.pack(side="right")
+
+        btn_add_rule = ctk.CTkButton(btn_frame, text="+ Add Rule",
+                                     command=self.add_yara_rule_dialog,
+                                     fg_color=self.colors["red"],
+                                     hover_color=self.colors["red_dark"],
+                                     font=Fonts.label_medium)
+        btn_add_rule.pack(side="left", padx=5)
+
+        btn_import_rule = ctk.CTkButton(btn_frame, text="Import from File",
+                                       command=self.import_yara_rule_file,
+                                       fg_color=self.colors["navy"],
+                                       hover_color=self.colors["dark_blue"],
+                                       font=Fonts.label_medium)
+        btn_import_rule.pack(side="left", padx=5)
+
+        btn_refresh = ctk.CTkButton(btn_frame, text="Refresh",
+                                   command=self.refresh_yara_rules_list,
+                                   fg_color=self.colors["navy"],
+                                   hover_color=self.colors["dark_blue"],
+                                   font=Fonts.label_medium)
+        btn_refresh.pack(side="left", padx=5)
+
+        # Info bar
+        info_frame = ctk.CTkFrame(frame, fg_color=self.colors["navy"], height=50)
+        info_frame.pack(fill="x", padx=20, pady=(0, 10))
+        info_frame.pack_propagate(False)
+
+        self.yara_rules_count_label = ctk.CTkLabel(info_frame,
+                                                   text="Total Rules: 0",
+                                                   font=Fonts.label_medium,
+                                                   text_color="white")
+        self.yara_rules_count_label.pack(side="left", padx=20, pady=10)
+
+        path_label = ctk.CTkLabel(info_frame,
+                                 text=f"Location: {self.case_manager.yara_rules_path}",
+                                 font=Fonts.label_small,
+                                 text_color="#cccccc")
+        path_label.pack(side="left", padx=20, pady=10)
+
+        # Rules list container with scrollbar
+        list_container = ctk.CTkFrame(frame, fg_color="transparent")
+        list_container.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+
+        # Create scrollable frame for rules
+        self.yara_rules_scroll = ctk.CTkScrollableFrame(list_container,
+                                                        fg_color=self.colors["navy"])
+        self.yara_rules_scroll.pack(fill="both", expand=True)
+
+    def refresh_yara_rules_list(self):
+        """Refresh the list of YARA rules"""
+        # Clear existing widgets
+        for widget in self.yara_rules_scroll.winfo_children():
+            widget.destroy()
+
+        # Get list of rules
+        rules = self.yara_rule_manager.list_rules()
+
+        # Update count
+        self.yara_rules_count_label.configure(text=f"Total Rules: {len(rules)}")
+
+        if not rules:
+            no_rules_label = ctk.CTkLabel(self.yara_rules_scroll,
+                                         text="No YARA rules found. Click 'Add Rule' to create one.",
+                                         font=Fonts.label_medium,
+                                         text_color="#888888")
+            no_rules_label.pack(pady=50)
+            return
+
+        # Display each rule as a card
+        for rule in rules:
+            self.create_yara_rule_card(rule)
+
+    def create_yara_rule_card(self, rule):
+        """Create a card for a single YARA rule"""
+        card = ctk.CTkFrame(self.yara_rules_scroll, fg_color=self.colors["dark_blue"],
+                           corner_radius=10)
+        card.pack(fill="x", padx=10, pady=5)
+
+        # Left side - Rule info
+        info_frame = ctk.CTkFrame(card, fg_color="transparent")
+        info_frame.pack(side="left", fill="both", expand=True, padx=15, pady=15)
+
+        rule_name = ctk.CTkLabel(info_frame, text=rule["name"],
+                                font=Fonts.label_large,
+                                text_color="white",
+                                anchor="w")
+        rule_name.pack(anchor="w")
+
+        size_text = f"Size: {rule['size']} bytes"
+        modified_text = f"Modified: {rule['modified'].strftime('%Y-%m-%d %H:%M:%S')}"
+        details = ctk.CTkLabel(info_frame, text=f"{size_text} | {modified_text}",
+                              font=Fonts.label_small,
+                              text_color="#888888",
+                              anchor="w")
+        details.pack(anchor="w", pady=(5, 0))
+
+        # Right side - Action buttons
+        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+        btn_frame.pack(side="right", padx=15, pady=15)
+
+        btn_view = ctk.CTkButton(btn_frame, text="View",
+                                command=lambda r=rule: self.view_yara_rule(r),
+                                fg_color=self.colors["navy"],
+                                hover_color=self.colors["dark_blue"],
+                                font=Fonts.label_small,
+                                width=80)
+        btn_view.pack(side="left", padx=3)
+
+        btn_edit = ctk.CTkButton(btn_frame, text="Edit",
+                                command=lambda r=rule: self.edit_yara_rule(r),
+                                fg_color=self.colors["navy"],
+                                hover_color=self.colors["dark_blue"],
+                                font=Fonts.label_small,
+                                width=80)
+        btn_edit.pack(side="left", padx=3)
+
+        btn_delete = ctk.CTkButton(btn_frame, text="Delete",
+                                  command=lambda r=rule: self.delete_yara_rule(r),
+                                  fg_color=self.colors["red"],
+                                  hover_color=self.colors["red_dark"],
+                                  font=Fonts.label_small,
+                                  width=80)
+        btn_delete.pack(side="left", padx=3)
+
+    def add_yara_rule_dialog(self):
+        """Show dialog to add a new YARA rule"""
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Add YARA Rule")
+        dialog.geometry("800x600")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Header
+        header = ctk.CTkLabel(dialog, text="Create New YARA Rule",
+                             font=Fonts.header_subsection)
+        header.pack(pady=20)
+
+        # Rule name input
+        name_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        name_frame.pack(fill="x", padx=20, pady=10)
+
+        name_label = ctk.CTkLabel(name_frame, text="Rule Filename:",
+                                 font=Fonts.label_medium)
+        name_label.pack(side="left", padx=10)
+
+        name_entry = ctk.CTkEntry(name_frame, placeholder_text="example.yara",
+                                 font=Fonts.label_medium, width=300)
+        name_entry.pack(side="left", padx=10)
+
+        # Rule content text area
+        content_label = ctk.CTkLabel(dialog, text="Rule Content:",
+                                    font=Fonts.label_medium)
+        content_label.pack(anchor="w", padx=30, pady=(10, 5))
+
+        content_frame = ctk.CTkFrame(dialog)
+        content_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        content_text = ctk.CTkTextbox(content_frame, font=("Courier", 12))
+        content_text.pack(fill="both", expand=True)
+
+        # Add example template
+        example_rule = """rule Example_Rule
+{
+    meta:
+        author = "Your Name"
+        description = "Description of what this rule detects"
+
+    strings:
+        $string1 = "suspicious string" ascii wide
+        $string2 = { 6A 40 68 00 30 00 00 }
+
+    condition:
+        any of them
+}"""
+        content_text.insert("1.0", example_rule)
+
+        # Validation status
+        status_label = ctk.CTkLabel(dialog, text="",
+                                   font=Fonts.label_small,
+                                   text_color="yellow")
+        status_label.pack(pady=5)
+
+        # Buttons
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_frame.pack(pady=20)
+
+        def validate_and_add():
+            rule_name = name_entry.get().strip()
+            rule_content = content_text.get("1.0", "end-1c").strip()
+
+            if not rule_name:
+                status_label.configure(text="Please enter a rule filename",
+                                      text_color="red")
+                return
+
+            if not rule_content:
+                status_label.configure(text="Please enter rule content",
+                                      text_color="red")
+                return
+
+            # Validate rule syntax
+            is_valid, error_msg = self.yara_rule_manager.validate_yara_rule(rule_content)
+            if not is_valid:
+                status_label.configure(text=f"Validation failed: {error_msg}",
+                                      text_color="red")
+                return
+
+            # Add the rule
+            success, message = self.yara_rule_manager.add_rule_from_content(rule_name, rule_content)
+            if success:
+                messagebox.showinfo("Success", message)
+                dialog.destroy()
+                self.refresh_yara_rules_list()
+                # Reload YARA rules in case manager
+                self.case_manager.load_yara_rules()
+            else:
+                status_label.configure(text=f"Error: {message}",
+                                      text_color="red")
+
+        btn_validate = ctk.CTkButton(btn_frame, text="Validate",
+                                    command=lambda: self.validate_rule_content(content_text, status_label),
+                                    fg_color=self.colors["navy"],
+                                    hover_color=self.colors["dark_blue"],
+                                    font=Fonts.label_medium)
+        btn_validate.pack(side="left", padx=5)
+
+        btn_add = ctk.CTkButton(btn_frame, text="Add Rule",
+                               command=validate_and_add,
+                               fg_color=self.colors["red"],
+                               hover_color=self.colors["red_dark"],
+                               font=Fonts.label_medium)
+        btn_add.pack(side="left", padx=5)
+
+        btn_cancel = ctk.CTkButton(btn_frame, text="Cancel",
+                                  command=dialog.destroy,
+                                  fg_color="gray",
+                                  font=Fonts.label_medium)
+        btn_cancel.pack(side="left", padx=5)
+
+    def validate_rule_content(self, text_widget, status_label):
+        """Validate YARA rule content"""
+        rule_content = text_widget.get("1.0", "end-1c").strip()
+        is_valid, error_msg = self.yara_rule_manager.validate_yara_rule(rule_content)
+
+        if is_valid:
+            status_label.configure(text="✓ Rule syntax is valid",
+                                  text_color="green")
+        else:
+            status_label.configure(text=f"✗ {error_msg}",
+                                  text_color="red")
+
+    def import_yara_rule_file(self):
+        """Import a YARA rule from a file"""
+        file_path = filedialog.askopenfilename(
+            title="Select YARA Rule File",
+            filetypes=[("YARA Rules", "*.yara *.yar"), ("All Files", "*.*")]
+        )
+
+        if not file_path:
+            return
+
+        success, message = self.yara_rule_manager.add_rule_from_file(file_path)
+        if success:
+            messagebox.showinfo("Success", message)
+            self.refresh_yara_rules_list()
+            # Reload YARA rules in case manager
+            self.case_manager.load_yara_rules()
+        else:
+            messagebox.showerror("Error", message)
+
+    def view_yara_rule(self, rule):
+        """View a YARA rule in a read-only dialog"""
+        success, content = self.yara_rule_manager.get_rule_content(rule["name"])
+        if not success:
+            messagebox.showerror("Error", content)
+            return
+
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title(f"View Rule: {rule['name']}")
+        dialog.geometry("800x600")
+        dialog.transient(self.root)
+
+        # Header
+        header = ctk.CTkLabel(dialog, text=rule["name"],
+                             font=Fonts.header_subsection)
+        header.pack(pady=20)
+
+        # Content display
+        content_frame = ctk.CTkFrame(dialog)
+        content_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        content_text = ctk.CTkTextbox(content_frame, font=("Courier", 12))
+        content_text.pack(fill="both", expand=True)
+        content_text.insert("1.0", content)
+        content_text.configure(state="disabled")
+
+        # Close button
+        btn_close = ctk.CTkButton(dialog, text="Close",
+                                 command=dialog.destroy,
+                                 font=Fonts.label_medium)
+        btn_close.pack(pady=20)
+
+    def edit_yara_rule(self, rule):
+        """Edit an existing YARA rule"""
+        success, content = self.yara_rule_manager.get_rule_content(rule["name"])
+        if not success:
+            messagebox.showerror("Error", content)
+            return
+
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title(f"Edit Rule: {rule['name']}")
+        dialog.geometry("800x600")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Header
+        header = ctk.CTkLabel(dialog, text=f"Editing: {rule['name']}",
+                             font=Fonts.header_subsection)
+        header.pack(pady=20)
+
+        # Content editor
+        content_frame = ctk.CTkFrame(dialog)
+        content_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        content_text = ctk.CTkTextbox(content_frame, font=("Courier", 12))
+        content_text.pack(fill="both", expand=True)
+        content_text.insert("1.0", content)
+
+        # Validation status
+        status_label = ctk.CTkLabel(dialog, text="",
+                                   font=Fonts.label_small)
+        status_label.pack(pady=5)
+
+        # Buttons
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_frame.pack(pady=20)
+
+        def save_changes():
+            new_content = content_text.get("1.0", "end-1c").strip()
+
+            # Validate
+            is_valid, error_msg = self.yara_rule_manager.validate_yara_rule(new_content)
+            if not is_valid:
+                status_label.configure(text=f"Validation failed: {error_msg}",
+                                      text_color="red")
+                return
+
+            # Update
+            success, message = self.yara_rule_manager.update_rule(rule["name"], new_content)
+            if success:
+                messagebox.showinfo("Success", message)
+                dialog.destroy()
+                self.refresh_yara_rules_list()
+                # Reload YARA rules in case manager
+                self.case_manager.load_yara_rules()
+            else:
+                status_label.configure(text=f"Error: {message}",
+                                      text_color="red")
+
+        btn_validate = ctk.CTkButton(btn_frame, text="Validate",
+                                    command=lambda: self.validate_rule_content(content_text, status_label),
+                                    fg_color=self.colors["navy"],
+                                    font=Fonts.label_medium)
+        btn_validate.pack(side="left", padx=5)
+
+        btn_save = ctk.CTkButton(btn_frame, text="Save Changes",
+                                command=save_changes,
+                                fg_color=self.colors["red"],
+                                hover_color=self.colors["red_dark"],
+                                font=Fonts.label_medium)
+        btn_save.pack(side="left", padx=5)
+
+        btn_cancel = ctk.CTkButton(btn_frame, text="Cancel",
+                                  command=dialog.destroy,
+                                  fg_color="gray",
+                                  font=Fonts.label_medium)
+        btn_cancel.pack(side="left", padx=5)
+
+    def delete_yara_rule(self, rule):
+        """Delete a YARA rule"""
+        result = messagebox.askyesno(
+            "Confirm Delete",
+            f"Are you sure you want to delete '{rule['name']}'?\n\nA backup will be created automatically."
+        )
+
+        if not result:
+            return
+
+        success, message = self.yara_rule_manager.delete_rule(rule["name"], create_backup=True)
+        if success:
+            messagebox.showinfo("Success", message)
+            self.refresh_yara_rules_list()
+            # Reload YARA rules in case manager
+            self.case_manager.load_yara_rules()
+        else:
+            messagebox.showerror("Error", message)
+
+    # ==================== SETTINGS TAB ====================
+    def create_settings_tab(self):
+        """Create the Settings tab"""
+        frame = ctk.CTkFrame(self.content_area, fg_color=self.colors["dark_blue"])
+        self.tabs["settings"] = frame
+
+        # Header
+        header_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        header_frame.pack(fill="x", padx=20, pady=20)
+
+        title = ctk.CTkLabel(header_frame, text="Application Settings",
+                            font=Fonts.header_subsection,
+                            text_color="white")
+        title.pack(side="left")
+
+        # Action buttons
+        btn_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        btn_frame.pack(side="right")
+
+        btn_save = ctk.CTkButton(btn_frame, text="Save Settings",
+                                command=self.save_settings,
+                                fg_color=self.colors["red"],
+                                hover_color=self.colors["red_dark"],
+                                font=Fonts.label_medium)
+        btn_save.pack(side="left", padx=5)
+
+        btn_reset = ctk.CTkButton(btn_frame, text="Reset to Defaults",
+                                 command=self.reset_settings,
+                                 fg_color=self.colors["navy"],
+                                 hover_color=self.colors["dark_blue"],
+                                 font=Fonts.label_medium)
+        btn_reset.pack(side="left", padx=5)
+
+        # Scrollable settings container
+        settings_scroll = ctk.CTkScrollableFrame(frame, fg_color="transparent")
+        settings_scroll.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+
+        # Store entry widgets for later access
+        self.settings_widgets = {}
+
+        # API Keys Section
+        self.create_settings_section(settings_scroll, "API Keys", [
+            ("api_keys.virustotal", "VirusTotal API Key", "entry"),
+            ("api_keys.threathq_user", "ThreatHQ Username", "entry"),
+            ("api_keys.threathq_pass", "ThreatHQ Password", "entry"),
+        ])
+
+        # Analysis Settings
+        self.create_settings_section(settings_scroll, "Analysis Settings", [
+            ("analysis.enable_process_monitoring", "Enable Process Monitoring", "switch"),
+            ("analysis.enable_network_monitoring", "Enable Network Monitoring", "switch"),
+            ("analysis.enable_yara_scanning", "Enable YARA Scanning", "switch"),
+            ("analysis.auto_scan_new_processes", "Auto-scan New Processes", "switch"),
+            ("analysis.enable_realtime_alerts", "Enable Real-time Alerts", "switch"),
+        ])
+
+        # UI Settings
+        self.create_settings_section(settings_scroll, "User Interface", [
+            ("application.theme", "Theme", "option", ["dark", "light"]),
+            ("application.auto_refresh_interval", "Auto-refresh Interval (ms)", "entry"),
+            ("application.max_popups_per_rule", "Max Alerts per Rule", "entry"),
+            ("ui.show_welcome_screen", "Show Welcome Screen", "switch"),
+            ("ui.confirm_before_delete", "Confirm Before Delete", "switch"),
+            ("ui.enable_tooltips", "Enable Tooltips", "switch"),
+        ])
+
+        # YARA Settings
+        self.create_settings_section(settings_scroll, "YARA Settings", [
+            ("yara.create_backups_on_delete", "Create Backups on Delete", "switch"),
+            ("yara.create_backups_on_update", "Create Backups on Update", "switch"),
+        ])
+
+        # Export Settings
+        self.create_settings_section(settings_scroll, "Export Settings", [
+            ("export.default_export_format", "Default Export Format", "option", ["json", "csv"]),
+            ("export.include_metadata", "Include Metadata", "switch"),
+            ("export.include_hashes", "Include File Hashes", "switch"),
+        ])
+
+        # Advanced Settings
+        self.create_settings_section(settings_scroll, "Advanced", [
+            ("advanced.debug_mode", "Debug Mode", "switch"),
+            ("advanced.log_file", "Log Filename", "entry"),
+            ("advanced.max_log_size_mb", "Max Log Size (MB)", "entry"),
+        ])
+
+        # Load current settings
+        self.load_settings_to_ui()
+
+    def create_settings_section(self, parent, section_name, settings_list):
+        """Create a settings section with multiple settings"""
+        # Section header
+        section_frame = ctk.CTkFrame(parent, fg_color=self.colors["navy"],
+                                    corner_radius=10)
+        section_frame.pack(fill="x", pady=10, padx=10)
+
+        header = ctk.CTkLabel(section_frame, text=section_name,
+                             font=Fonts.label_large,
+                             text_color="white")
+        header.pack(anchor="w", padx=20, pady=15)
+
+        # Settings items
+        for setting_info in settings_list:
+            key_path = setting_info[0]
+            label_text = setting_info[1]
+            widget_type = setting_info[2]
+            options = setting_info[3] if len(setting_info) > 3 else None
+
+            self.create_setting_item(section_frame, key_path, label_text, widget_type, options)
+
+    def create_setting_item(self, parent, key_path, label_text, widget_type, options=None):
+        """Create a single setting item"""
+        item_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        item_frame.pack(fill="x", padx=20, pady=5)
+
+        # Label
+        label = ctk.CTkLabel(item_frame, text=label_text,
+                            font=Fonts.label_medium,
+                            text_color="white",
+                            width=300,
+                            anchor="w")
+        label.pack(side="left", padx=10)
+
+        # Widget based on type
+        if widget_type == "entry":
+            widget = ctk.CTkEntry(item_frame, font=Fonts.label_medium, width=300)
+            widget.pack(side="right", padx=10, pady=5)
+        elif widget_type == "switch":
+            widget = ctk.CTkSwitch(item_frame, text="", font=Fonts.label_medium)
+            widget.pack(side="right", padx=10, pady=5)
+        elif widget_type == "option" and options:
+            widget = ctk.CTkOptionMenu(item_frame, values=options,
+                                      font=Fonts.label_medium, width=200)
+            widget.pack(side="right", padx=10, pady=5)
+        else:
+            return
+
+        # Store widget reference
+        self.settings_widgets[key_path] = widget
+
+    def load_settings_to_ui(self):
+        """Load settings from manager into UI widgets"""
+        for key_path, widget in self.settings_widgets.items():
+            value = self.settings_manager.get(key_path)
+
+            if isinstance(widget, ctk.CTkEntry):
+                widget.delete(0, "end")
+                widget.insert(0, str(value) if value is not None else "")
+            elif isinstance(widget, ctk.CTkSwitch):
+                if value:
+                    widget.select()
+                else:
+                    widget.deselect()
+            elif isinstance(widget, ctk.CTkOptionMenu):
+                widget.set(str(value))
+
+    def save_settings(self):
+        """Save settings from UI to settings manager"""
+        for key_path, widget in self.settings_widgets.items():
+            if isinstance(widget, ctk.CTkEntry):
+                value = widget.get()
+                # Try to convert to appropriate type
+                try:
+                    # Try int first
+                    if value.isdigit():
+                        value = int(value)
+                    elif value.replace('.', '', 1).isdigit():
+                        value = float(value)
+                except:
+                    pass  # Keep as string
+                self.settings_manager.set(key_path, value)
+            elif isinstance(widget, ctk.CTkSwitch):
+                value = widget.get() == 1
+                self.settings_manager.set(key_path, value)
+            elif isinstance(widget, ctk.CTkOptionMenu):
+                value = widget.get()
+                self.settings_manager.set(key_path, value)
+
+        # Save to file
+        if self.settings_manager.save_settings():
+            messagebox.showinfo("Success", "Settings saved successfully")
+        else:
+            messagebox.showerror("Error", "Failed to save settings")
+
+    def reset_settings(self):
+        """Reset settings to defaults"""
+        result = messagebox.askyesno(
+            "Confirm Reset",
+            "Are you sure you want to reset all settings to defaults?\n\nThis action cannot be undone."
+        )
+
+        if not result:
+            return
+
+        if self.settings_manager.reset_to_defaults():
+            self.load_settings_to_ui()
+            messagebox.showinfo("Success", "Settings reset to defaults")
+        else:
+            messagebox.showerror("Error", "Failed to reset settings")
+
     # ==================== APPLICATION LIFECYCLE ====================
     def run(self):
         """Start the application"""

@@ -1079,6 +1079,15 @@ class ForensicAnalysisGUI:
             label="📋 Copy Entire Row",
             command=self.copy_network_row
         )
+        self.network_context_menu.add_separator(background="#444444")
+        self.network_context_menu.add_command(
+            label="➕ Add Remote IP to IOCs",
+            command=lambda: self.add_network_ioc_to_case("remote_ip")
+        )
+        self.network_context_menu.add_command(
+            label="➕ Add Hostname to IOCs",
+            command=lambda: self.add_network_ioc_to_case("hostname")
+        )
 
         self.network_tree.bind("<Button-3>", self.show_network_context_menu)
 
@@ -1379,6 +1388,8 @@ class ForensicAnalysisGUI:
                                       activebackground=self.colors["red"])
         events_context_menu.add_command(label="🔍 Focus on PID", command=None)  # Will be set
         events_context_menu.add_command(label="📋 Copy Path", command=None)  # Will be set
+        events_context_menu.add_separator()
+        events_context_menu.add_command(label="➕ Extract IOCs to Case", command=lambda: self.add_live_event_iocs_to_case(events_tree))
         events_context_menu.add_separator()
         events_context_menu.add_command(label="🗑 Remove Event", command=None)  # Will be set
 
@@ -5313,6 +5324,92 @@ Risk Level: {risk_level}"""
                 self.root.update()  # Keep clipboard after window closes
         except Exception as e:
             pass
+
+    def add_network_ioc_to_case(self, field_type):
+        """Add selected network IOC to current case"""
+        if not self.current_case:
+            messagebox.showwarning("No Active Case", "No active case to add IOC to. Please create or load a case first.")
+            return
+
+        selection = self.network_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a network connection first.")
+            return
+
+        try:
+            item = self.network_tree.item(selection[0])
+            values = item['values']  # [Type, Local, Remote, Hostname, Status, Process, Suspicious]
+
+            if field_type == "remote_ip" and len(values) > 2:
+                # Extract IP from "IP:Port" format in Remote column (index 2)
+                remote_addr = str(values[2])
+                remote_ip = remote_addr.split(':')[0] if ':' in remote_addr else remote_addr
+
+                # Validate it's not empty or just a dash
+                if remote_ip and remote_ip != '-':
+                    self.case_manager.add_ioc("ips", remote_ip)
+                    self.refresh_iocs_display()
+                    messagebox.showinfo("Success", f"Added IP '{remote_ip}' to case IOCs!")
+                else:
+                    messagebox.showwarning("Invalid IP", "No valid IP address found in the selected connection.")
+
+            elif field_type == "hostname" and len(values) > 3:
+                hostname = str(values[3])
+                # Validate hostname is not empty or dash
+                if hostname and hostname != '-':
+                    self.case_manager.add_ioc("domains", hostname)
+                    self.refresh_iocs_display()
+                    messagebox.showinfo("Success", f"Added domain '{hostname}' to case IOCs!")
+                else:
+                    messagebox.showwarning("Invalid Hostname", "No valid hostname found in the selected connection.")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to add IOC: {str(e)}")
+
+    def add_live_event_iocs_to_case(self, events_tree):
+        """Extract and add IOCs from selected live event(s) to current case"""
+        if not self.current_case:
+            messagebox.showwarning("No Active Case", "No active case to add IOCs to. Please create or load a case first.")
+            return
+
+        selections = events_tree.selection()
+        if not selections:
+            messagebox.showwarning("No Selection", "Please select one or more live events first.")
+            return
+
+        try:
+            # Collect all text from selected events to extract IOCs
+            all_text = []
+            for selection in selections:
+                item = events_tree.item(selection)
+                values = item['values']  # [time, pid, process, type, operation, path, result]
+
+                # Get path/target field (index 5) which is most likely to contain IOCs
+                if len(values) > 5:
+                    path = str(values[5])
+                    all_text.append(path)
+
+            # Join all text and extract IOCs using case_manager's built-in method
+            combined_text = " ".join(all_text)
+            extracted_iocs = self.case_manager.extract_iocs_from_text(combined_text)
+
+            # Add extracted IOCs to case
+            total_added = 0
+            for ioc_type in ['urls', 'ips', 'domains']:
+                if extracted_iocs.get(ioc_type):
+                    for ioc_value in extracted_iocs[ioc_type]:
+                        self.case_manager.add_ioc(ioc_type, ioc_value)
+                        total_added += 1
+
+            if total_added > 0:
+                self.refresh_iocs_display()
+                ioc_summary = f"URLs: {len(extracted_iocs.get('urls', []))}, IPs: {len(extracted_iocs.get('ips', []))}, Domains: {len(extracted_iocs.get('domains', []))}"
+                messagebox.showinfo("Success", f"Extracted and added {total_added} IOC(s) to case!\n\n{ioc_summary}")
+            else:
+                messagebox.showinfo("No IOCs Found", "No IOCs (URLs, IPs, or domains) were found in the selected event(s).")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to extract IOCs: {str(e)}")
 
     def resolve_hostname(self, ip_address):
         """Resolve IP address to hostname with caching"""

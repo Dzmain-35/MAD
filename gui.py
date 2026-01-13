@@ -1871,7 +1871,7 @@ class ForensicAnalysisGUI:
         # Connect context menu commands
         events_context_menu.entryconfig(0, command=focus_on_pid)
         events_context_menu.entryconfig(1, command=copy_path_to_clipboard)
-        events_context_menu.entryconfig(3, command=remove_event)
+        events_context_menu.entryconfig(5, command=remove_event)  # Updated index after adding IOC extraction menu items
 
         # Store toggle function for auto-start
         self.live_events_toggle_monitoring = toggle_monitoring

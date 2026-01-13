@@ -2977,19 +2977,162 @@ File Size: {file_info['file_size']} bytes"""
         path_label.pack(side="left", padx=20, pady=10)
 
         # Rules list container with scrollbar
-        list_container = ctk.CTkFrame(frame, fg_color="transparent")
+        list_container = ctk.CTkFrame(frame, fg_color=self.colors["navy"])
         list_container.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
-        # Create scrollable frame for rules
-        self.yara_rules_scroll = ctk.CTkScrollableFrame(list_container,
-                                                        fg_color=self.colors["navy"])
-        self.yara_rules_scroll.pack(fill="both", expand=True)
+        # Create Treeview for efficient display of many rules
+        # Style configuration for dark theme
+        style = ttk.Style()
+        style.theme_use('default')
+        style.configure("Yara.Treeview",
+                       background="#1a2332",
+                       foreground="white",
+                       fieldbackground="#1a2332",
+                       borderwidth=0,
+                       font=('Segoe UI', 11))
+        style.configure("Yara.Treeview.Heading",
+                       background="#0d1520",
+                       foreground="white",
+                       borderwidth=0,
+                       font=('Segoe UI', 12, 'bold'))
+        style.map('Yara.Treeview',
+                 background=[('selected', '#991b1b')])
+
+        # Create treeview with scrollbar
+        tree_frame = tk.Frame(list_container, bg="#1a2332")
+        tree_frame.pack(fill="both", expand=True, padx=2, pady=2)
+
+        # Scrollbars
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical")
+        vsb.pack(side="right", fill="y")
+
+        hsb = ttk.Scrollbar(tree_frame, orient="horizontal")
+        hsb.pack(side="bottom", fill="x")
+
+        # Treeview
+        self.yara_rules_tree = ttk.Treeview(
+            tree_frame,
+            columns=("name", "size", "modified"),
+            show="headings",
+            style="Yara.Treeview",
+            yscrollcommand=vsb.set,
+            xscrollcommand=hsb.set,
+            selectmode="browse"
+        )
+
+        vsb.config(command=self.yara_rules_tree.yview)
+        hsb.config(command=self.yara_rules_tree.xview)
+
+        # Configure columns with sorting
+        self.yara_rules_tree.heading("name", text="Rule Filename ▼", anchor="w",
+                                     command=lambda: self.sort_yara_tree("name"))
+        self.yara_rules_tree.heading("size", text="Size (bytes)", anchor="center",
+                                     command=lambda: self.sort_yara_tree("size"))
+        self.yara_rules_tree.heading("modified", text="Last Modified", anchor="center",
+                                     command=lambda: self.sort_yara_tree("modified"))
+
+        self.yara_rules_tree.column("name", width=300, anchor="w")
+        self.yara_rules_tree.column("size", width=120, anchor="center")
+        self.yara_rules_tree.column("modified", width=200, anchor="center")
+
+        self.yara_rules_tree.pack(fill="both", expand=True)
+
+        # Context menu for rule actions
+        self.yara_context_menu = tk.Menu(self.root, tearoff=0, bg="#0d1520", fg="white",
+                                         activebackground="#991b1b", activeforeground="white")
+        self.yara_context_menu.add_command(label="View Rule", command=self.view_selected_yara_rule)
+        self.yara_context_menu.add_command(label="Edit Rule", command=self.edit_selected_yara_rule)
+        self.yara_context_menu.add_separator()
+        self.yara_context_menu.add_command(label="Delete Rule", command=self.delete_selected_yara_rule)
+
+        # Bind right-click
+        self.yara_rules_tree.bind("<Button-3>", self.show_yara_context_menu)
+
+        # Bind double-click to view
+        self.yara_rules_tree.bind("<Double-1>", lambda e: self.view_selected_yara_rule())
+
+        # Action buttons below the table
+        action_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        action_frame.pack(fill="x", padx=20, pady=10)
+
+        btn_view = ctk.CTkButton(action_frame, text="View",
+                                command=self.view_selected_yara_rule,
+                                fg_color=self.colors["navy"],
+                                hover_color=self.colors["dark_blue"],
+                                font=Fonts.label_large,
+                                width=100)
+        btn_view.pack(side="left", padx=5)
+
+        btn_edit = ctk.CTkButton(action_frame, text="Edit",
+                                command=self.edit_selected_yara_rule,
+                                fg_color=self.colors["navy"],
+                                hover_color=self.colors["dark_blue"],
+                                font=Fonts.label_large,
+                                width=100)
+        btn_edit.pack(side="left", padx=5)
+
+        btn_delete = ctk.CTkButton(action_frame, text="Delete",
+                                  command=self.delete_selected_yara_rule,
+                                  fg_color=self.colors["red"],
+                                  hover_color=self.colors["red_dark"],
+                                  font=Fonts.label_large,
+                                  width=100)
+        btn_delete.pack(side="left", padx=5)
+
+        # Initialize sort state
+        self.yara_sort_column = "name"
+        self.yara_sort_reverse = False
+
+    def sort_yara_tree(self, column):
+        """Sort treeview by column"""
+        # Toggle sort direction if clicking same column
+        if self.yara_sort_column == column:
+            self.yara_sort_reverse = not self.yara_sort_reverse
+        else:
+            self.yara_sort_column = column
+            self.yara_sort_reverse = False
+
+        # Get all items
+        items = [(self.yara_rules_tree.item(item, "values"), item)
+                 for item in self.yara_rules_tree.get_children("")]
+
+        # Determine sort key based on column
+        if column == "name":
+            col_idx = 0
+            key_func = lambda x: x[0][col_idx].lower()
+        elif column == "size":
+            col_idx = 1
+            key_func = lambda x: int(x[0][col_idx].replace(",", "")) if x[0][col_idx] else 0
+        elif column == "modified":
+            col_idx = 2
+            key_func = lambda x: x[0][col_idx]
+
+        # Sort items
+        items.sort(key=key_func, reverse=self.yara_sort_reverse)
+
+        # Rearrange items in treeview
+        for idx, (values, item) in enumerate(items):
+            self.yara_rules_tree.move(item, "", idx)
+
+        # Update column headers with sort indicator
+        for col in ["name", "size", "modified"]:
+            header_text = {
+                "name": "Rule Filename",
+                "size": "Size (bytes)",
+                "modified": "Last Modified"
+            }[col]
+
+            if col == column:
+                arrow = " ▼" if self.yara_sort_reverse else " ▲"
+                header_text += arrow
+
+            self.yara_rules_tree.heading(col, text=header_text)
 
     def refresh_yara_rules_list(self):
-        """Refresh the list of YARA rules"""
-        # Clear existing widgets
-        for widget in self.yara_rules_scroll.winfo_children():
-            widget.destroy()
+        """Refresh the list of YARA rules - optimized for large lists"""
+        # Clear existing items
+        for item in self.yara_rules_tree.get_children():
+            self.yara_rules_tree.delete(item)
 
         # Get list of rules
         rules = self.yara_rule_manager.list_rules()
@@ -2998,68 +3141,67 @@ File Size: {file_info['file_size']} bytes"""
         self.yara_rules_count_label.configure(text=f"Total Rules: {len(rules)}")
 
         if not rules:
-            no_rules_label = ctk.CTkLabel(self.yara_rules_scroll,
-                                         text="No YARA rules found. Click 'Add Rule' to create one.",
-                                         font=Fonts.label_large,
-                                         text_color="#888888")
-            no_rules_label.pack(pady=50)
+            # Insert a message item
+            self.yara_rules_tree.insert("", "end", values=("No YARA rules found", "", ""))
             return
 
-        # Display each rule as a card
+        # Insert all rules into treeview (very fast even with 100+ rules)
         for rule in rules:
-            self.create_yara_rule_card(rule)
+            self.yara_rules_tree.insert(
+                "",
+                "end",
+                values=(
+                    rule["name"],
+                    f"{rule['size']:,}",
+                    rule['modified'].strftime('%Y-%m-%d %H:%M:%S')
+                ),
+                tags=(rule["name"],)  # Store rule name in tags for easy retrieval
+            )
 
-    def create_yara_rule_card(self, rule):
-        """Create a card for a single YARA rule"""
-        card = ctk.CTkFrame(self.yara_rules_scroll, fg_color=self.colors["dark_blue"],
-                           corner_radius=10)
-        card.pack(fill="x", padx=10, pady=5)
+    def show_yara_context_menu(self, event):
+        """Show context menu on right-click"""
+        # Select the item under cursor
+        item = self.yara_rules_tree.identify_row(event.y)
+        if item:
+            self.yara_rules_tree.selection_set(item)
+            self.yara_context_menu.post(event.x_root, event.y_root)
 
-        # Left side - Rule info
-        info_frame = ctk.CTkFrame(card, fg_color="transparent")
-        info_frame.pack(side="left", fill="both", expand=True, padx=15, pady=15)
+    def get_selected_yara_rule(self):
+        """Get the currently selected rule from the tree"""
+        selection = self.yara_rules_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a rule first")
+            return None
 
-        rule_name = ctk.CTkLabel(info_frame, text=rule["name"],
-                                font=Fonts.label_large,
-                                text_color="white",
-                                anchor="w")
-        rule_name.pack(anchor="w")
+        item = selection[0]
+        values = self.yara_rules_tree.item(item, "values")
+        if not values or values[0] == "No YARA rules found":
+            return None
 
-        size_text = f"Size: {rule['size']} bytes"
-        modified_text = f"Modified: {rule['modified'].strftime('%Y-%m-%d %H:%M:%S')}"
-        details = ctk.CTkLabel(info_frame, text=f"{size_text} | {modified_text}",
-                              font=Fonts.label,
-                              text_color="#888888",
-                              anchor="w")
-        details.pack(anchor="w", pady=(5, 0))
+        # Return rule dict with the necessary info
+        return {
+            "name": values[0],
+            "size": int(values[1].replace(",", "")),
+            "modified": None  # Not needed for operations
+        }
 
-        # Right side - Action buttons
-        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
-        btn_frame.pack(side="right", padx=15, pady=15)
+    def view_selected_yara_rule(self):
+        """View the selected rule"""
+        rule = self.get_selected_yara_rule()
+        if rule:
+            self.view_yara_rule(rule)
 
-        btn_view = ctk.CTkButton(btn_frame, text="View",
-                                command=lambda r=rule: self.view_yara_rule(r),
-                                fg_color=self.colors["navy"],
-                                hover_color=self.colors["dark_blue"],
-                                font=Fonts.label,
-                                width=80)
-        btn_view.pack(side="left", padx=3)
+    def edit_selected_yara_rule(self):
+        """Edit the selected rule"""
+        rule = self.get_selected_yara_rule()
+        if rule:
+            self.edit_yara_rule(rule)
 
-        btn_edit = ctk.CTkButton(btn_frame, text="Edit",
-                                command=lambda r=rule: self.edit_yara_rule(r),
-                                fg_color=self.colors["navy"],
-                                hover_color=self.colors["dark_blue"],
-                                font=Fonts.label,
-                                width=80)
-        btn_edit.pack(side="left", padx=3)
-
-        btn_delete = ctk.CTkButton(btn_frame, text="Delete",
-                                  command=lambda r=rule: self.delete_yara_rule(r),
-                                  fg_color=self.colors["red"],
-                                  hover_color=self.colors["red_dark"],
-                                  font=Fonts.label,
-                                  width=80)
-        btn_delete.pack(side="left", padx=3)
+    def delete_selected_yara_rule(self):
+        """Delete the selected rule"""
+        rule = self.get_selected_yara_rule()
+        if rule:
+            self.delete_yara_rule(rule)
 
     def add_yara_rule_dialog(self):
         """Show dialog to add a new YARA rule"""

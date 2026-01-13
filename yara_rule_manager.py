@@ -230,13 +230,14 @@ class YaraRuleManager:
         except Exception as e:
             return False, f"Error reading rule: {str(e)}"
 
-    def update_rule(self, rule_name: str, new_content: str) -> Tuple[bool, str]:
+    def update_rule(self, rule_name: str, new_content: str, create_backup: bool = True) -> Tuple[bool, str]:
         """
         Update an existing YARA rule
 
         Args:
             rule_name: Name of the rule file to update
             new_content: New YARA rule content
+            create_backup: If True, creates a backup before updating
 
         Returns:
             Tuple of (success, message)
@@ -252,20 +253,22 @@ class YaraRuleManager:
             return False, f"Rule validation failed: {error_msg}"
 
         try:
-            # Create backup before updating
-            backup_dir = self.yara_rules_path / "_backups"
-            backup_dir.mkdir(exist_ok=True)
+            # Create backup before updating if requested
+            if create_backup:
+                backup_dir = self.yara_rules_path / "_backups"
+                backup_dir.mkdir(exist_ok=True)
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_name = f"{rule_path.stem}_{timestamp}{rule_path.suffix}"
-            backup_path = backup_dir / backup_name
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_name = f"{rule_path.stem}_{timestamp}{rule_path.suffix}"
+                backup_path = backup_dir / backup_name
 
-            shutil.copy2(rule_path, backup_path)
+                shutil.copy2(rule_path, backup_path)
 
             # Write new content
             with open(rule_path, 'w', encoding='utf-8') as f:
                 f.write(new_content)
 
-            return True, f"Rule '{rule_name}' updated successfully (backup created)"
+            backup_msg = " (backup created)" if create_backup else ""
+            return True, f"Rule '{rule_name}' updated successfully{backup_msg}"
         except Exception as e:
             return False, f"Error updating rule: {str(e)}"

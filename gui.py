@@ -40,46 +40,58 @@ class ForensicAnalysisGUI:
             "red_dark": "#991b1b",
             "sidebar_bg": "#991b1b"
         }
-        
-        # Initialize case manager (will auto-detect paths)
-        self.case_manager = CaseManager()
+
+        # Initialize settings manager first
+        self.settings_manager = SettingsManager()
+        print("Settings loaded successfully")
+
+        # Get API keys from settings
+        vt_api_key = self.settings_manager.get("api_keys.virustotal")
+        threathq_user = self.settings_manager.get("api_keys.threathq_user")
+        threathq_pass = self.settings_manager.get("api_keys.threathq_pass")
+
+        # Initialize case manager with API keys from settings
+        self.case_manager = CaseManager(
+            vt_api_key=vt_api_key if vt_api_key else None,
+            threathq_user=threathq_user if threathq_user else None,
+            threathq_pass=threathq_pass if threathq_pass else None
+        )
         print(f"Case storage initialized at: {self.case_manager.case_storage_path}")
-        
+
+        # Initialize YARA rule manager
+        self.yara_rule_manager = YaraRuleManager(self.case_manager.yara_rules_path)
+
         # Data references
         self.current_case = None
         self.scan_in_progress = False
         self.cancel_scan = False
         self.progress_window = None
-        
+
         # Initialize analysis modules
         self.process_monitor = ProcessMonitor(
             yara_rules_path=self.case_manager.yara_rules_path
         )
-        
-        self.network_monitor = NetworkMonitor()
 
-        # Initialize YARA rule manager and settings manager
-        self.yara_rule_manager = YaraRuleManager(self.case_manager.yara_rules_path)
-        self.settings_manager = SettingsManager()
+        self.network_monitor = NetworkMonitor()
 
         # Register callbacks for real-time updates
         self.process_monitor.register_process_callback(self.on_new_process_detected)
         self.network_monitor.register_connection_callback(self.on_new_connection_detected)
-        
-        # Monitoring states
+
+        # Monitoring states (from settings)
         self.process_monitor_active = False
         self.network_monitor_active = False
 
-        # Auto-refresh state
+        # Auto-refresh state (from settings)
         self.auto_refresh_enabled = True
-        self.auto_refresh_interval = 2000  # 2 seconds
+        self.auto_refresh_interval = self.settings_manager.get("application.auto_refresh_interval", 2000)
         self.auto_refresh_job = None
         self.pid_to_tree_item = {}  # Track PIDs to tree item IDs for incremental updates
         self.process_tree_initial_load = True  # Track if this is the first process list load
 
-        # YARA popup limiting (to reduce alert fatigue)
+        # YARA popup limiting (from settings)
         self.popup_count_by_rule = {}  # Track popup count per YARA rule family
-        self.max_popups_per_rule = 3   # Limit popups to 3 per rule family
+        self.max_popups_per_rule = self.settings_manager.get("application.max_popups_per_rule", 3)
         self.total_yara_matches = 0    # Total YARA matches for badge display
 
         # Procmon live monitors (PID -> monitor instance)
@@ -3426,8 +3438,9 @@ File Size: {file_info['file_size']} bytes"""
                                       text_color="red")
                 return
 
-            # Update
-            success, message = self.yara_rule_manager.update_rule(rule["name"], new_content)
+            # Update with backup setting from settings
+            create_backup = self.settings_manager.get("yara.create_backups_on_update", True)
+            success, message = self.yara_rule_manager.update_rule(rule["name"], new_content, create_backup=create_backup)
             if success:
                 messagebox.showinfo("Success", message)
                 dialog.destroy()
@@ -3459,15 +3472,19 @@ File Size: {file_info['file_size']} bytes"""
 
     def delete_yara_rule(self, rule):
         """Delete a YARA rule"""
+        # Check if backups are enabled in settings
+        create_backup = self.settings_manager.get("yara.create_backups_on_delete", True)
+
+        backup_msg = "\n\nA backup will be created automatically." if create_backup else ""
         result = messagebox.askyesno(
             "Confirm Delete",
-            f"Are you sure you want to delete '{rule['name']}'?\n\nA backup will be created automatically."
+            f"Are you sure you want to delete '{rule['name']}'?{backup_msg}"
         )
 
         if not result:
             return
 
-        success, message = self.yara_rule_manager.delete_rule(rule["name"], create_backup=True)
+        success, message = self.yara_rule_manager.delete_rule(rule["name"], create_backup=create_backup)
         if success:
             messagebox.showinfo("Success", message)
             self.refresh_yara_rules_list()
@@ -3656,9 +3673,31 @@ File Size: {file_info['file_size']} bytes"""
 
         # Save to file
         if self.settings_manager.save_settings():
-            messagebox.showinfo("Success", "Settings saved successfully")
+            # Apply settings immediately
+            self.apply_settings()
+            messagebox.showinfo("Success", "Settings saved and applied successfully.\n\nNote: API key changes will take effect for new operations.")
         else:
             messagebox.showerror("Error", "Failed to save settings")
+
+    def apply_settings(self):
+        """Apply settings to the running application"""
+        # Apply UI settings
+        self.auto_refresh_interval = self.settings_manager.get("application.auto_refresh_interval", 2000)
+        self.max_popups_per_rule = self.settings_manager.get("application.max_popups_per_rule", 3)
+
+        # Update API keys in case manager (for new operations)
+        vt_api_key = self.settings_manager.get("api_keys.virustotal")
+        threathq_user = self.settings_manager.get("api_keys.threathq_user")
+        threathq_pass = self.settings_manager.get("api_keys.threathq_pass")
+
+        if vt_api_key:
+            self.case_manager.vt_api_key = vt_api_key
+        if threathq_user:
+            self.case_manager.threathq_user = threathq_user
+        if threathq_pass:
+            self.case_manager.threathq_pass = threathq_pass
+
+        print("Settings applied successfully")
 
     def reset_settings(self):
         """Reset settings to defaults"""
@@ -3672,7 +3711,8 @@ File Size: {file_info['file_size']} bytes"""
 
         if self.settings_manager.reset_to_defaults():
             self.load_settings_to_ui()
-            messagebox.showinfo("Success", "Settings reset to defaults")
+            self.apply_settings()
+            messagebox.showinfo("Success", "Settings reset to defaults and applied")
         else:
             messagebox.showerror("Error", "Failed to reset settings")
 

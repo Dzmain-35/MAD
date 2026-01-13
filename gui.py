@@ -2942,21 +2942,21 @@ File Size: {file_info['file_size']} bytes"""
                                      command=self.add_yara_rule_dialog,
                                      fg_color=self.colors["red"],
                                      hover_color=self.colors["red_dark"],
-                                     font=Fonts.label_medium)
+                                     font=Fonts.label_large)
         btn_add_rule.pack(side="left", padx=5)
 
         btn_import_rule = ctk.CTkButton(btn_frame, text="Import from File",
                                        command=self.import_yara_rule_file,
                                        fg_color=self.colors["navy"],
                                        hover_color=self.colors["dark_blue"],
-                                       font=Fonts.label_medium)
+                                       font=Fonts.label_large)
         btn_import_rule.pack(side="left", padx=5)
 
         btn_refresh = ctk.CTkButton(btn_frame, text="Refresh",
                                    command=self.refresh_yara_rules_list,
                                    fg_color=self.colors["navy"],
                                    hover_color=self.colors["dark_blue"],
-                                   font=Fonts.label_medium)
+                                   font=Fonts.label_large)
         btn_refresh.pack(side="left", padx=5)
 
         # Info bar
@@ -2966,13 +2966,13 @@ File Size: {file_info['file_size']} bytes"""
 
         self.yara_rules_count_label = ctk.CTkLabel(info_frame,
                                                    text="Total Rules: 0",
-                                                   font=Fonts.label_medium,
+                                                   font=Fonts.label_large,
                                                    text_color="white")
         self.yara_rules_count_label.pack(side="left", padx=20, pady=10)
 
         path_label = ctk.CTkLabel(info_frame,
                                  text=f"Location: {self.case_manager.yara_rules_path}",
-                                 font=Fonts.label_small,
+                                 font=Fonts.label,
                                  text_color="#cccccc")
         path_label.pack(side="left", padx=20, pady=10)
 
@@ -3000,7 +3000,7 @@ File Size: {file_info['file_size']} bytes"""
         if not rules:
             no_rules_label = ctk.CTkLabel(self.yara_rules_scroll,
                                          text="No YARA rules found. Click 'Add Rule' to create one.",
-                                         font=Fonts.label_medium,
+                                         font=Fonts.label_large,
                                          text_color="#888888")
             no_rules_label.pack(pady=50)
             return
@@ -3028,7 +3028,7 @@ File Size: {file_info['file_size']} bytes"""
         size_text = f"Size: {rule['size']} bytes"
         modified_text = f"Modified: {rule['modified'].strftime('%Y-%m-%d %H:%M:%S')}"
         details = ctk.CTkLabel(info_frame, text=f"{size_text} | {modified_text}",
-                              font=Fonts.label_small,
+                              font=Fonts.label,
                               text_color="#888888",
                               anchor="w")
         details.pack(anchor="w", pady=(5, 0))
@@ -3041,7 +3041,7 @@ File Size: {file_info['file_size']} bytes"""
                                 command=lambda r=rule: self.view_yara_rule(r),
                                 fg_color=self.colors["navy"],
                                 hover_color=self.colors["dark_blue"],
-                                font=Fonts.label_small,
+                                font=Fonts.label,
                                 width=80)
         btn_view.pack(side="left", padx=3)
 
@@ -3049,7 +3049,7 @@ File Size: {file_info['file_size']} bytes"""
                                 command=lambda r=rule: self.edit_yara_rule(r),
                                 fg_color=self.colors["navy"],
                                 hover_color=self.colors["dark_blue"],
-                                font=Fonts.label_small,
+                                font=Fonts.label,
                                 width=80)
         btn_edit.pack(side="left", padx=3)
 
@@ -3057,7 +3057,7 @@ File Size: {file_info['file_size']} bytes"""
                                   command=lambda r=rule: self.delete_yara_rule(r),
                                   fg_color=self.colors["red"],
                                   hover_color=self.colors["red_dark"],
-                                  font=Fonts.label_small,
+                                  font=Fonts.label,
                                   width=80)
         btn_delete.pack(side="left", padx=3)
 
@@ -3079,16 +3079,16 @@ File Size: {file_info['file_size']} bytes"""
         name_frame.pack(fill="x", padx=20, pady=10)
 
         name_label = ctk.CTkLabel(name_frame, text="Rule Filename:",
-                                 font=Fonts.label_medium)
+                                 font=Fonts.label_large)
         name_label.pack(side="left", padx=10)
 
         name_entry = ctk.CTkEntry(name_frame, placeholder_text="example.yara",
-                                 font=Fonts.label_medium, width=300)
+                                 font=Fonts.label_large, width=300)
         name_entry.pack(side="left", padx=10)
 
         # Rule content text area
         content_label = ctk.CTkLabel(dialog, text="Rule Content:",
-                                    font=Fonts.label_medium)
+                                    font=Fonts.label_large)
         content_label.pack(anchor="w", padx=30, pady=(10, 5))
 
         content_frame = ctk.CTkFrame(dialog)
@@ -3115,7 +3115,7 @@ File Size: {file_info['file_size']} bytes"""
 
         # Validation status
         status_label = ctk.CTkLabel(dialog, text="",
-                                   font=Fonts.label_small,
+                                   font=Fonts.label,
                                    text_color="yellow")
         status_label.pack(pady=5)
 
@@ -3160,20 +3160,20 @@ File Size: {file_info['file_size']} bytes"""
                                     command=lambda: self.validate_rule_content(content_text, status_label),
                                     fg_color=self.colors["navy"],
                                     hover_color=self.colors["dark_blue"],
-                                    font=Fonts.label_medium)
+                                    font=Fonts.label_large)
         btn_validate.pack(side="left", padx=5)
 
         btn_add = ctk.CTkButton(btn_frame, text="Add Rule",
                                command=validate_and_add,
                                fg_color=self.colors["red"],
                                hover_color=self.colors["red_dark"],
-                               font=Fonts.label_medium)
+                               font=Fonts.label_large)
         btn_add.pack(side="left", padx=5)
 
         btn_cancel = ctk.CTkButton(btn_frame, text="Cancel",
                                   command=dialog.destroy,
                                   fg_color="gray",
-                                  font=Fonts.label_medium)
+                                  font=Fonts.label_large)
         btn_cancel.pack(side="left", padx=5)
 
     def validate_rule_content(self, text_widget, status_label):
@@ -3236,7 +3236,7 @@ File Size: {file_info['file_size']} bytes"""
         # Close button
         btn_close = ctk.CTkButton(dialog, text="Close",
                                  command=dialog.destroy,
-                                 font=Fonts.label_medium)
+                                 font=Fonts.label_large)
         btn_close.pack(pady=20)
 
     def edit_yara_rule(self, rule):
@@ -3267,7 +3267,7 @@ File Size: {file_info['file_size']} bytes"""
 
         # Validation status
         status_label = ctk.CTkLabel(dialog, text="",
-                                   font=Fonts.label_small)
+                                   font=Fonts.label)
         status_label.pack(pady=5)
 
         # Buttons
@@ -3299,20 +3299,20 @@ File Size: {file_info['file_size']} bytes"""
         btn_validate = ctk.CTkButton(btn_frame, text="Validate",
                                     command=lambda: self.validate_rule_content(content_text, status_label),
                                     fg_color=self.colors["navy"],
-                                    font=Fonts.label_medium)
+                                    font=Fonts.label_large)
         btn_validate.pack(side="left", padx=5)
 
         btn_save = ctk.CTkButton(btn_frame, text="Save Changes",
                                 command=save_changes,
                                 fg_color=self.colors["red"],
                                 hover_color=self.colors["red_dark"],
-                                font=Fonts.label_medium)
+                                font=Fonts.label_large)
         btn_save.pack(side="left", padx=5)
 
         btn_cancel = ctk.CTkButton(btn_frame, text="Cancel",
                                   command=dialog.destroy,
                                   fg_color="gray",
-                                  font=Fonts.label_medium)
+                                  font=Fonts.label_large)
         btn_cancel.pack(side="left", padx=5)
 
     def delete_yara_rule(self, rule):
@@ -3357,14 +3357,14 @@ File Size: {file_info['file_size']} bytes"""
                                 command=self.save_settings,
                                 fg_color=self.colors["red"],
                                 hover_color=self.colors["red_dark"],
-                                font=Fonts.label_medium)
+                                font=Fonts.label_large)
         btn_save.pack(side="left", padx=5)
 
         btn_reset = ctk.CTkButton(btn_frame, text="Reset to Defaults",
                                  command=self.reset_settings,
                                  fg_color=self.colors["navy"],
                                  hover_color=self.colors["dark_blue"],
-                                 font=Fonts.label_medium)
+                                 font=Fonts.label_large)
         btn_reset.pack(side="left", padx=5)
 
         # Scrollable settings container
@@ -3451,7 +3451,7 @@ File Size: {file_info['file_size']} bytes"""
 
         # Label
         label = ctk.CTkLabel(item_frame, text=label_text,
-                            font=Fonts.label_medium,
+                            font=Fonts.label_large,
                             text_color="white",
                             width=300,
                             anchor="w")
@@ -3459,14 +3459,14 @@ File Size: {file_info['file_size']} bytes"""
 
         # Widget based on type
         if widget_type == "entry":
-            widget = ctk.CTkEntry(item_frame, font=Fonts.label_medium, width=300)
+            widget = ctk.CTkEntry(item_frame, font=Fonts.label_large, width=300)
             widget.pack(side="right", padx=10, pady=5)
         elif widget_type == "switch":
-            widget = ctk.CTkSwitch(item_frame, text="", font=Fonts.label_medium)
+            widget = ctk.CTkSwitch(item_frame, text="", font=Fonts.label_large)
             widget.pack(side="right", padx=10, pady=5)
         elif widget_type == "option" and options:
             widget = ctk.CTkOptionMenu(item_frame, values=options,
-                                      font=Fonts.label_medium, width=200)
+                                      font=Fonts.label_large, width=200)
             widget.pack(side="right", padx=10, pady=5)
         else:
             return

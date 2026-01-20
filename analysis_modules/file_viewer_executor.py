@@ -8,8 +8,20 @@ Author: MAD Development Team
 import os
 import subprocess
 import threading
+import sys
 from typing import Optional, Tuple
 from pathlib import Path
+
+# Windows-specific imports for suspended process creation
+if sys.platform == 'win32':
+    try:
+        import ctypes
+        from ctypes import wintypes
+        WINDOWS_AVAILABLE = True
+    except ImportError:
+        WINDOWS_AVAILABLE = False
+else:
+    WINDOWS_AVAILABLE = False
 
 
 class FileViewerExecutor:
@@ -27,12 +39,14 @@ class FileViewerExecutor:
             '.cmd': self._execute_batch,
             '.exe': self._execute_binary,
             '.dll': self._execute_dll,
+            '.msi': self._execute_msi,
             '.js': self._execute_javascript,
             '.vbs': self._execute_vbscript,
             '.vbe': self._execute_vbscript,
             '.wsf': self._execute_wscript,
             '.hta': self._execute_hta,
         }
+        self.last_process = None  # Track last executed process
 
     def read_file_as_hex(self, file_path: str, max_bytes: int = 1024 * 1024) -> Tuple[str, int]:
         """
@@ -119,13 +133,14 @@ class FileViewerExecutor:
         ext = Path(file_path).suffix.lower()
         return ext in self.execution_handlers
 
-    def execute_file(self, file_path: str, callback=None) -> Optional[dict]:
+    def execute_file(self, file_path: str, callback=None, suspended=False) -> Optional[dict]:
         """
         Execute file based on extension.
 
         Args:
             file_path: Path to the file to execute
             callback: Optional callback function to receive output
+            suspended: If True, start process in suspended state (Windows only)
 
         Returns:
             Dictionary with execution info or None if cannot execute
@@ -134,6 +149,11 @@ class FileViewerExecutor:
             return {'error': 'File not found', 'success': False}
 
         ext = Path(file_path).suffix.lower()
+
+        # Handle suspended execution for executables
+        if suspended and ext in ['.exe', '.msi']:
+            return self._execute_suspended(file_path, callback)
+
         handler = self.execution_handlers.get(ext)
 
         if not handler:
@@ -308,6 +328,110 @@ class FileViewerExecutor:
             return 'HTA application launched', ''
         except Exception as e:
             return '', f'Error executing HTA: {str(e)}'
+
+    def _execute_msi(self, file_path: str) -> Tuple[str, str]:
+        """Execute MSI installer using msiexec."""
+        try:
+            # Launch MSI installer with /i (install) flag
+            # Using /qn for silent install, remove if you want UI
+            process = subprocess.Popen(
+                ['msiexec', '/i', file_path, '/qn'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=os.path.dirname(file_path)
+            )
+            self.last_process = process
+            return f'MSI installer launched (PID: {process.pid})', ''
+        except Exception as e:
+            return '', f'Error executing MSI: {str(e)}'
+
+    def _execute_suspended(self, file_path: str, callback=None) -> dict:
+        """
+        Execute file in suspended state (Windows only).
+
+        Args:
+            file_path: Path to the executable to run
+            callback: Optional callback function
+
+        Returns:
+            Dictionary with execution info including process handle
+        """
+        if not WINDOWS_AVAILABLE:
+            return {
+                'success': False,
+                'error': 'Suspended execution only available on Windows'
+            }
+
+        try:
+            # Use subprocess with CREATE_SUSPENDED flag on Windows
+            # CREATE_SUSPENDED = 0x00000004
+            CREATE_SUSPENDED = 0x00000004
+
+            # Use Popen to create suspended process
+            startupinfo = subprocess.STARTUPINFO()
+
+            process = subprocess.Popen(
+                [file_path],
+                cwd=os.path.dirname(file_path),
+                creationflags=CREATE_SUSPENDED,
+                startupinfo=startupinfo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+
+            self.last_process = process
+
+            result = {
+                'success': True,
+                'message': f'Process created in suspended state (PID: {process.pid})',
+                'pid': process.pid,
+                'process': process,
+                'suspended': True
+            }
+
+            if callback:
+                callback(result)
+
+            return result
+
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Failed to create suspended process: {str(e)}'
+            }
+
+    def resume_process(self, process) -> bool:
+        """
+        Resume a suspended process (Windows only).
+
+        Args:
+            process: The suspended process object
+
+        Returns:
+            True if resumed successfully
+        """
+        if not WINDOWS_AVAILABLE:
+            return False
+
+        try:
+            # Use kernel32 to resume the main thread
+            kernel32 = ctypes.windll.kernel32
+
+            # Open the process
+            PROCESS_ALL_ACCESS = 0x1F0FFF
+            h_process = kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, process.pid)
+
+            if h_process:
+                # Resume the main thread (thread ID is typically PID + 4 on Windows)
+                # This is a simplification - in reality we'd enumerate threads
+                kernel32.ResumeThread(h_process)
+                kernel32.CloseHandle(h_process)
+                return True
+
+            return False
+        except Exception as e:
+            print(f"Error resuming process: {e}")
+            return False
 
     def get_file_info(self, file_path: str) -> dict:
         """

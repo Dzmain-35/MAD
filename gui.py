@@ -2830,6 +2830,38 @@ File Size: {file_info['file_size']} bytes"""
         execute_file_btn.pack(side="top", pady=(0, 5))
         execute_file_btn.bind("<Button-1>", execute_file_click)
 
+        # Execute (Suspended) button
+        def execute_suspended_click(event):
+            file_path = file_info.get('storage_path', '')
+            if file_path and os.path.exists(file_path):
+                # Check if file is EXE or MSI (only these support suspended execution)
+                if file_path.lower().endswith(('.exe', '.msi')):
+                    self.execute_file(file_path, file_info['filename'], suspended=True)
+                else:
+                    messagebox.showinfo(
+                        "Not Supported",
+                        "Suspended execution is only supported for EXE and MSI files."
+                    )
+            else:
+                messagebox.showerror("File Not Found", f"File not found: {file_path}")
+            return "break"
+
+        execute_suspended_btn = ctk.CTkButton(
+            right_frame,
+            text="⏸ Execute (Suspended)",
+            width=120,
+            height=28,
+            font=Fonts.helper,
+            fg_color="transparent",
+            border_width=2,
+            border_color="#FFA500",
+            text_color="#FFA500",
+            hover_color=self.colors["navy"],
+            cursor="hand2"
+        )
+        execute_suspended_btn.pack(side="top", pady=(0, 5))
+        execute_suspended_btn.bind("<Button-1>", execute_suspended_click)
+
         # Expand/Collapse indicator
         details_visible = [False]
         details_frame = ctk.CTkFrame(card_frame, fg_color="#0d1520", height=200)
@@ -5702,104 +5734,53 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
         # Load in thread
         threading.Thread(target=load_text, daemon=True).start()
 
-    def execute_file(self, file_path, file_name):
-        """Execute file and show results"""
+    def execute_file(self, file_path, file_name, suspended=False):
+        """Execute file and redirect to Analysis tab"""
         viewer = get_viewer_executor()
 
         # Check if can execute
         if not viewer.can_execute(file_path):
             messagebox.showwarning(
                 "Cannot Execute",
-                f"No execution handler for this file type.\n\nSupported: .py, .ps1, .bat, .cmd, .exe, .dll, .js, .vbs, .wsf, .hta"
+                f"No execution handler for this file type.\n\nSupported: .py, .ps1, .bat, .cmd, .exe, .dll, .msi, .js, .vbs, .wsf, .hta"
             )
             return
 
         # Confirmation dialog
+        mode_text = "in SUSPENDED state" if suspended else ""
         result = messagebox.askyesno(
             "Execute File",
-            f"Are you sure you want to execute:\n\n{file_name}\n\nThis file will run on your system!",
+            f"Are you sure you want to execute {mode_text}:\n\n{file_name}\n\nThis file will run on your system!",
             icon='warning'
         )
 
         if not result:
             return
 
-        # Create results window
-        results_window = ctk.CTkToplevel(self.root)
-        results_window.title(f"Execution: {file_name}")
-        results_window.geometry("1000x600")
-
-        # Main container
-        main_container = ctk.CTkFrame(results_window, fg_color=self.colors["dark_blue"])
-        main_container.pack(fill="both", expand=True, padx=10, pady=10)
-
-        # Header
-        header = ctk.CTkFrame(main_container, fg_color=self.colors["navy"], height=60)
-        header.pack(fill="x", padx=0, pady=(0, 10))
-        header.pack_propagate(False)
-
-        title = ctk.CTkLabel(
-            header,
-            text=f"▶️ Executing: {file_name}",
-            font=Fonts.logo_subtitle
-        )
-        title.pack(side="left", padx=20, pady=15)
-
-        # Status label
-        status_label = ctk.CTkLabel(
-            header,
-            text="⏳ Running...",
-            font=Fonts.helper,
-            text_color="#FFA500"
-        )
-        status_label.pack(side="right", padx=20)
-
-        # Output tabs
-        tab_view = ctk.CTkTabview(main_container, fg_color=self.colors["navy"])
-        tab_view.pack(fill="both", expand=True, padx=10, pady=10)
-
-        stdout_tab = tab_view.add("Standard Output")
-        stderr_tab = tab_view.add("Standard Error")
-
-        # Create text widgets for output
-        stdout_text = tk.Text(
-            stdout_tab,
-            wrap="word",
-            bg="#0d1520",
-            fg="#00ff00",
-            font=("Courier New", 10)
-        )
-        stdout_text.pack(fill="both", expand=True, padx=5, pady=5)
-
-        stderr_text = tk.Text(
-            stderr_tab,
-            wrap="word",
-            bg="#0d1520",
-            fg="#ff4444",
-            font=("Courier New", 10)
-        )
-        stderr_text.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # Execute file
-        def on_execution_complete(result):
-            if result.get('success'):
-                output = result.get('output', '')
-                error = result.get('error', '')
-
-                stdout_text.insert("1.0", output if output else "(no output)")
-                stderr_text.insert("1.0", error if error else "(no errors)")
-
-                status_label.configure(text="✅ Complete", text_color="#00ff00")
-            else:
-                error = result.get('error', 'Unknown error')
-                stderr_text.insert("1.0", error)
-                status_label.configure(text="❌ Failed", text_color="#ff4444")
-
-        exec_result = viewer.execute_file(file_path, callback=on_execution_complete)
+        # Execute the file
+        exec_result = viewer.execute_file(file_path, suspended=suspended)
 
         if not exec_result.get('success'):
             messagebox.showerror("Execution Error", exec_result.get('error', 'Unknown error'))
-            results_window.destroy()
+            return
+
+        # Show success message with PID if available
+        if suspended:
+            pid = exec_result.get('pid', 'Unknown')
+            messagebox.showinfo(
+                "Process Created",
+                f"Process created in SUSPENDED state!\n\nPID: {pid}\nFile: {file_name}\n\nSwitch to Analysis tab to monitor process activity."
+            )
+        else:
+            pid = exec_result.get('pid', 'Unknown')
+            if pid != 'Unknown':
+                messagebox.showinfo(
+                    "Process Launched",
+                    f"Process launched successfully!\n\nPID: {pid}\nFile: {file_name}\n\nSwitch to Analysis tab to monitor process activity."
+                )
+
+        # Switch to Analysis tab
+        self.show_tab("analysis")
 
 
 # Main entry point

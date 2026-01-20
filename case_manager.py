@@ -1147,19 +1147,38 @@ Threat Score: {file_info.get('threat_score', 0)} ({file_info.get('threat_level',
 
             # Print summary
             if results.get('techniques_detected'):
-                print(f"  Obfuscation detected: {len(results['techniques_detected'])} technique(s)")
-                for tech in results['techniques_detected'][:3]:  # Show first 3
-                    print(f"    - {tech}")
+                print(f"  ✓ Obfuscation detected: {len(results['techniques_detected'])} technique(s)")
+                for tech in results['techniques_detected'][:5]:  # Show first 5
+                    print(f"    • {tech}")
+                if len(results['techniques_detected']) > 5:
+                    print(f"    ... and {len(results['techniques_detected']) - 5} more")
             else:
-                print("  No obfuscation detected")
+                print("  ℹ No obfuscation detected")
 
-            if results.get('iocs_found'):
-                print(f"  IOCs extracted: {len(results['iocs_found'])}")
-                for ioc in results['iocs_found'][:3]:  # Show first 3
-                    print(f"    - {ioc['type']}: {ioc['value']}")
+            num_iocs = len(results.get('iocs_found', []))
+            if num_iocs > 0:
+                print(f"  ✓ IOCs extracted: {num_iocs}")
+                # Group by type
+                iocs_by_type = {}
+                for ioc in results['iocs_found']:
+                    ioc_type = ioc['type']
+                    if ioc_type not in iocs_by_type:
+                        iocs_by_type[ioc_type] = []
+                    iocs_by_type[ioc_type].append(ioc['value'])
 
-            if results.get('suspicious_patterns'):
-                print(f"  Suspicious patterns: {len(results['suspicious_patterns'])}")
+                # Show summary by type
+                for ioc_type, values in sorted(iocs_by_type.items()):
+                    print(f"    • {ioc_type}: {len(values)} found")
+                    for val in values[:2]:  # Show first 2 of each type
+                        print(f"      - {val}")
+                    if len(values) > 2:
+                        print(f"      ... and {len(values) - 2} more")
+
+            suspicious = results.get('suspicious_patterns', [])
+            if suspicious:
+                print(f"  ⚠ Suspicious patterns: {len(suspicious)}")
+                for pattern in suspicious[:3]:
+                    print(f"    • {pattern}")
 
             # Don't store the full original/decoded content in the results
             # (it can be very large), just store metadata

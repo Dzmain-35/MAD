@@ -22,7 +22,8 @@ class ScriptDecoder:
 
     def __init__(self):
         """Initialize the script decoder."""
-        self.decode_iterations = 5  # Max iterations for recursive decoding
+        self.decode_iterations = 3  # Max iterations for recursive decoding (reduced for speed)
+        self.max_content_size = 5 * 1024 * 1024  # 5MB limit for fast processing
         self.results = {
             'decoded_content': '',
             'techniques_detected': [],
@@ -112,36 +113,55 @@ class ScriptDecoder:
         """Detect JavaScript obfuscation techniques used."""
         techniques = []
 
-        if re.search(r'String\.fromCharCode\s*\(', content, re.IGNORECASE):
-            techniques.append('String.fromCharCode() encoding')
+        # Sample first 100KB for detection (performance optimization)
+        sample = content[:100000] if len(content) > 100000 else content
 
-        if re.search(r'eval\s*\(', content, re.IGNORECASE):
-            techniques.append('eval() usage (dynamic code execution)')
+        if re.search(r'String\.fromCharCode\s*\(', sample, re.IGNORECASE):
+            count = len(re.findall(r'String\.fromCharCode\s*\(', sample, re.IGNORECASE))
+            techniques.append(f'String.fromCharCode() encoding ({count} calls)')
 
-        if re.search(r'unescape\s*\(', content, re.IGNORECASE):
-            techniques.append('unescape() encoding')
+        if re.search(r'eval\s*\(', sample, re.IGNORECASE):
+            count = len(re.findall(r'eval\s*\(', sample, re.IGNORECASE))
+            techniques.append(f'eval() usage ({count} calls)')
 
-        if re.search(r'atob\s*\(', content, re.IGNORECASE):
-            techniques.append('Base64 decoding (atob)')
+        if re.search(r'unescape\s*\(', sample, re.IGNORECASE):
+            count = len(re.findall(r'unescape\s*\(', sample, re.IGNORECASE))
+            techniques.append(f'unescape() encoding ({count} calls)')
 
-        if re.search(r'\\x[0-9a-fA-F]{2}', content):
-            techniques.append('Hex escape sequences (\\xNN)')
+        if re.search(r'atob\s*\(', sample, re.IGNORECASE):
+            count = len(re.findall(r'atob\s*\(', sample, re.IGNORECASE))
+            techniques.append(f'Base64 decoding - atob() ({count} calls)')
 
-        if re.search(r'\\u[0-9a-fA-F]{4}', content):
-            techniques.append('Unicode escape sequences (\\uNNNN)')
+        if re.search(r'\\x[0-9a-fA-F]{2}', sample):
+            count = len(re.findall(r'\\x[0-9a-fA-F]{2}', sample))
+            if count > 10:
+                techniques.append(f'Hex escape sequences ({count} instances)')
+
+        if re.search(r'\\u[0-9a-fA-F]{4}', sample):
+            count = len(re.findall(r'\\u[0-9a-fA-F]{4}', sample))
+            if count > 10:
+                techniques.append(f'Unicode escape sequences ({count} instances)')
 
         # Detect heavy string concatenation (possible obfuscation)
-        concat_count = len(re.findall(r'["\'][^"\']*["\']\s*\+\s*["\']', content))
-        if concat_count > 20:
+        concat_count = len(re.findall(r'["\'][^"\']{1,30}["\']\s*\+\s*["\']', sample))
+        if concat_count > 50:
             techniques.append(f'Heavy string concatenation ({concat_count} instances)')
 
         # Detect array-based obfuscation
-        if re.search(r'\w+\[\d+\]\s*\+\s*\w+\[\d+\]', content):
+        if re.search(r'\w+\[\d+\]\s*\+\s*\w+\[\d+\]', sample):
             techniques.append('Array-based string construction')
 
         # Detect character code manipulation
-        if re.search(r'charCodeAt\s*\(', content, re.IGNORECASE):
+        if re.search(r'charCodeAt\s*\(', sample, re.IGNORECASE):
             techniques.append('charCodeAt() usage')
+
+        # Check for obfuscator signatures
+        if re.search(r'_0x[a-f0-9]{4,}', sample):
+            techniques.append('Obfuscator signature detected (hex variable names)')
+
+        # Check for packed/compressed code
+        if 'eval(function(p,a,c,k,e,d)' in sample or 'eval(function(p,a,c,k,e,r)' in sample:
+            techniques.append('Packed code (Dean Edwards packer)')
 
         self.results['techniques_detected'] = techniques
 
@@ -313,6 +333,10 @@ class ScriptDecoder:
         Simplify string concatenation.
         Example: "hel" + "lo" + " " + "world" -> "hello world"
         """
+        # Only process if there are concatenations (quick check)
+        if '"+' not in content and '"  +' not in content:
+            return content
+
         # Simple pattern: "str1" + "str2" -> "str1str2"
         def combine_strings(match):
             str1 = match.group(1)
@@ -323,8 +347,8 @@ class ScriptDecoder:
         current = content
         iterations = 0
 
-        # Keep combining until no more changes
-        while current != previous and iterations < 50:
+        # Keep combining until no more changes (max 10 iterations for speed)
+        while current != previous and iterations < 10:
             previous = current
             # Pattern: "string1" + "string2"
             pattern = r'"([^"]*)"\s*\+\s*"([^"]*)"'
@@ -338,42 +362,83 @@ class ScriptDecoder:
 
     def _extract_iocs(self, content: str):
         """Extract Indicators of Compromise from decoded content."""
-        iocs = []
+        iocs_dict = {}  # Use dict to deduplicate
 
-        # URLs
-        url_pattern = r'https?://[^\s\'"<>]+'
+        # Common false positive patterns to exclude
+        js_keywords = {
+            'this.', 'var.', 'function.', 'return.', 'new.', 'typeof.',
+            'window.', 'document.', 'console.', 'prototype.', 'constructor.',
+            'length.', 'value.', 'name.', 'type.', 'id.', 'class.',
+            'style.', 'innerhtml.', 'textcontent.', 'addeventlistener.',
+            'eval.', 'string.', 'object.', 'array.', 'number.', 'boolean.',
+            'math.', 'date.', 'json.', 'parsefloat.', 'parseint.',
+            'isnan.', 'isfinite.', 'undefined.', 'null.'
+        }
+
+        # URLs (most reliable IOC)
+        url_pattern = r'https?://[a-zA-Z0-9][a-zA-Z0-9\-\.]*[a-zA-Z0-9](?::[0-9]+)?(?:/[^\s\'"<>]*)?'
         urls = re.findall(url_pattern, content, re.IGNORECASE)
-        for url in urls:
-            iocs.append({'type': 'URL', 'value': url})
+        for url in urls[:100]:  # Limit to first 100
+            # Skip obvious false positives
+            if any(skip in url.lower() for skip in ['example.com', 'example.org', 'localhost', '127.0.0.1']):
+                continue
+            iocs_dict[f"URL:{url}"] = {'type': 'URL', 'value': url}
 
-        # IP addresses
-        ip_pattern = r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
+        # IP addresses (not in already-found URLs)
+        ip_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
         ips = re.findall(ip_pattern, content)
-        for ip in ips:
-            # Basic validation
-            parts = ip.split('.')
-            if all(0 <= int(part) <= 255 for part in parts):
-                iocs.append({'type': 'IP', 'value': ip})
+        for ip in ips[:50]:  # Limit to first 50
+            # Skip private/reserved IPs
+            parts = [int(x) for x in ip.split('.')]
+            if parts[0] in [10, 127] or (parts[0] == 172 and 16 <= parts[1] <= 31) or (parts[0] == 192 and parts[1] == 168):
+                continue
+            if ip == '0.0.0.0' or ip == '255.255.255.255':
+                continue
+            # Only add if not part of a URL we already found
+            if not any(ip in ioc['value'] for ioc in iocs_dict.values() if ioc['type'] == 'URL'):
+                iocs_dict[f"IP:{ip}"] = {'type': 'IP', 'value': ip}
 
         # Email addresses
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
         emails = re.findall(email_pattern, content)
-        for email in emails:
-            iocs.append({'type': 'Email', 'value': email})
+        for email in emails[:20]:  # Limit to first 20
+            if any(skip in email.lower() for skip in ['example.com', 'example.org', 'test.com']):
+                continue
+            iocs_dict[f"Email:{email}"] = {'type': 'Email', 'value': email}
 
-        # Domain names (loose pattern)
-        domain_pattern = r'\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\b'
-        domains = re.findall(domain_pattern, content, re.IGNORECASE)
-        for domain in domains:
-            if '.' in domain and not domain.replace('.', '').isdigit():
-                iocs.append({'type': 'Domain', 'value': domain})
+        # Domain names - ONLY if they look suspicious and not in URLs
+        # Only extract domains that appear in suspicious contexts
+        suspicious_domain_contexts = [
+            r'(?:connect|host|server|domain|url|site|c2|callback|beacon|exfil)[\s\'"=:,]+["\']?([a-z0-9][a-z0-9\-\.]{3,}\.[a-z]{2,})',
+            r'//\s*([a-z0-9][a-z0-9\-\.]{3,}\.[a-z]{2,})',  # After //
+        ]
 
-        # File paths (Windows and Unix)
-        file_pattern = r'(?:[A-Z]:\\|/)[^\s\'"<>|?*]+'
+        for pattern in suspicious_domain_contexts:
+            domains = re.findall(pattern, content, re.IGNORECASE)
+            for domain in domains[:20]:  # Limit per pattern
+                domain_lower = domain.lower()
+                # Skip if it's a JS keyword/property
+                if any(domain_lower.startswith(kw) for kw in js_keywords):
+                    continue
+                # Skip common false positives
+                if any(skip in domain_lower for skip in ['example.', 'test.', 'localhost', 'prototype.', '.length', '.value']):
+                    continue
+                # Must have valid TLD
+                tld = domain.split('.')[-1].lower()
+                if len(tld) < 2 or tld.isdigit():
+                    continue
+                # Skip if already in URLs
+                if not any(domain in ioc['value'] for ioc in iocs_dict.values() if ioc['type'] == 'URL'):
+                    iocs_dict[f"Domain:{domain}"] = {'type': 'Domain', 'value': domain}
+
+        # Windows file paths (be very selective)
+        file_pattern = r'\b[A-Z]:\\(?:Windows|Users|Program Files|ProgramData|Temp|AppData)\\[^\s\'"<>|?*]{3,50}'
         files = re.findall(file_pattern, content)
-        for filepath in files:
-            iocs.append({'type': 'File Path', 'value': filepath})
+        for filepath in files[:20]:  # Limit to first 20
+            iocs_dict[f"FilePath:{filepath}"] = {'type': 'File Path', 'value': filepath}
 
+        # Convert dict back to list
+        iocs = list(iocs_dict.values())
         self.results['iocs_found'] = iocs
         logger.info(f"Extracted {len(iocs)} IOCs")
 

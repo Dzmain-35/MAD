@@ -14,6 +14,7 @@ from analysis_modules.network_monitor import NetworkMonitor
 from analysis_modules.procmon_events import ProcmonLiveMonitor, ProcmonEvent
 from analysis_modules.system_wide_monitor import SystemWideMonitor, EventFilter
 from analysis_modules.sysmon_parser import SysmonLogMonitor
+from analysis_modules.file_viewer_executor import get_viewer_executor
 import tkinter as tk
 from tkinter import ttk
 import re
@@ -2776,6 +2777,59 @@ File Size: {file_info['file_size']} bytes"""
         view_strings_btn.pack(side="top", pady=(0, 5))
         view_strings_btn.bind("<Button-1>", view_strings_click)
 
+        # View File button
+        def view_file_click(event):
+            file_path = file_info.get('storage_path', '')
+            if file_path and os.path.exists(file_path):
+                # Determine if file is likely text or binary
+                viewer = get_viewer_executor()
+                info = viewer.get_file_info(file_path)
+
+                if info.get('is_text', False):
+                    self.view_file_text(file_path, file_info['filename'])
+                else:
+                    self.view_file_hex(file_path, file_info['filename'])
+            else:
+                messagebox.showerror("File Not Found", f"File not found: {file_path}")
+            return "break"
+
+        view_file_btn = ctk.CTkButton(
+            right_frame,
+            text="👁 View File",
+            width=120,
+            height=28,
+            font=Fonts.helper,
+            fg_color="transparent",
+            border_width=2,
+            border_color=self.colors["red"],
+            hover_color=self.colors["navy"],
+            cursor="hand2"
+        )
+        view_file_btn.pack(side="top", pady=(0, 5))
+        view_file_btn.bind("<Button-1>", view_file_click)
+
+        # Execute File button
+        def execute_file_click(event):
+            file_path = file_info.get('storage_path', '')
+            if file_path and os.path.exists(file_path):
+                self.execute_file(file_path, file_info['filename'])
+            else:
+                messagebox.showerror("File Not Found", f"File not found: {file_path}")
+            return "break"
+
+        execute_file_btn = ctk.CTkButton(
+            right_frame,
+            text="▶️ Execute",
+            width=120,
+            height=28,
+            font=Fonts.helper,
+            fg_color=self.colors["red"],
+            hover_color=self.colors["red_dark"],
+            cursor="hand2"
+        )
+        execute_file_btn.pack(side="top", pady=(0, 5))
+        execute_file_btn.bind("<Button-1>", execute_file_click)
+
         # Expand/Collapse indicator
         details_visible = [False]
         details_frame = ctk.CTkFrame(card_frame, fg_color="#0d1520", height=200)
@@ -5478,6 +5532,274 @@ Risk Level: {risk_level}"""
 Active: {summary['active_connections']} | Total: {summary['total_connections']} | Suspicious: {summary['suspicious_connections']}
 Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_local_ports']}"""
             self.network_stats_label.configure(text=stats_text)
+
+    # ==================== FILE VIEWER AND EXECUTOR ====================
+    def view_file_hex(self, file_path, file_name):
+        """View file in hex format"""
+        viewer = get_viewer_executor()
+
+        # Create window
+        hex_window = ctk.CTkToplevel(self.root)
+        hex_window.title(f"Hex View: {file_name}")
+        hex_window.geometry("1200x700")
+
+        # Main container
+        main_container = ctk.CTkFrame(hex_window, fg_color=self.colors["dark_blue"])
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Header
+        header = ctk.CTkFrame(main_container, fg_color=self.colors["navy"], height=60)
+        header.pack(fill="x", padx=0, pady=(0, 10))
+        header.pack_propagate(False)
+
+        title = ctk.CTkLabel(
+            header,
+            text=f"🔍 Hex View: {file_name}",
+            font=Fonts.logo_subtitle
+        )
+        title.pack(side="left", padx=20, pady=15)
+
+        # File info
+        file_info = viewer.get_file_info(file_path)
+        info_text = f"Size: {file_info.get('size_kb', 0):.2f} KB"
+        info_label = ctk.CTkLabel(
+            header,
+            text=info_text,
+            font=Fonts.helper,
+            text_color="gray60"
+        )
+        info_label.pack(side="right", padx=20)
+
+        # Text display with scrollbar
+        text_frame = ctk.CTkFrame(main_container, fg_color=self.colors["navy"])
+        text_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Create text widget
+        hex_text = tk.Text(
+            text_frame,
+            wrap="none",
+            bg="#0d1520",
+            fg="#ffffff",
+            font=("Courier New", 10),
+            selectbackground="#2a4d6e",
+            selectforeground="#ffffff"
+        )
+
+        # Scrollbars
+        vsb = ttk.Scrollbar(text_frame, orient="vertical", command=hex_text.yview)
+        hsb = ttk.Scrollbar(text_frame, orient="horizontal", command=hex_text.xview)
+        hex_text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        # Pack scrollbars and text
+        vsb.pack(side="right", fill="y")
+        hsb.pack(side="bottom", fill="x")
+        hex_text.pack(side="left", fill="both", expand=True)
+
+        # Load hex content in background
+        def load_hex():
+            hex_content, bytes_read = viewer.read_file_as_hex(file_path, max_bytes=1024*1024)  # 1MB max
+            hex_text.delete("1.0", "end")
+            hex_text.insert("1.0", hex_content)
+            hex_text.configure(state="disabled")  # Make read-only
+
+            if bytes_read >= 1024*1024:
+                hex_text.insert("end", f"\n\n... (showing first 1MB of {file_info.get('size_mb', 0):.2f} MB)")
+
+        # Load in thread to avoid freezing GUI
+        threading.Thread(target=load_hex, daemon=True).start()
+
+    def view_file_text(self, file_path, file_name):
+        """View file as text"""
+        viewer = get_viewer_executor()
+
+        # Create window
+        text_window = ctk.CTkToplevel(self.root)
+        text_window.title(f"Text View: {file_name}")
+        text_window.geometry("1200x700")
+
+        # Main container
+        main_container = ctk.CTkFrame(text_window, fg_color=self.colors["dark_blue"])
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Header
+        header = ctk.CTkFrame(main_container, fg_color=self.colors["navy"], height=60)
+        header.pack(fill="x", padx=0, pady=(0, 10))
+        header.pack_propagate(False)
+
+        title = ctk.CTkLabel(
+            header,
+            text=f"📄 Text View: {file_name}",
+            font=Fonts.logo_subtitle
+        )
+        title.pack(side="left", padx=20, pady=15)
+
+        # File info
+        file_info = viewer.get_file_info(file_path)
+        info_text = f"Size: {file_info.get('size_kb', 0):.2f} KB"
+        info_label = ctk.CTkLabel(
+            header,
+            text=info_text,
+            font=Fonts.helper,
+            text_color="gray60"
+        )
+        info_label.pack(side="right", padx=20)
+
+        # Text display with scrollbar
+        text_frame = ctk.CTkFrame(main_container, fg_color=self.colors["navy"])
+        text_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Create text widget with line numbers
+        line_frame = tk.Frame(text_frame, bg="#0d1520")
+        line_frame.pack(side="left", fill="y")
+
+        line_numbers = tk.Text(
+            line_frame,
+            width=6,
+            wrap="none",
+            bg="#1a2332",
+            fg="gray60",
+            font=("Courier New", 10),
+            state="disabled",
+            takefocus=0
+        )
+        line_numbers.pack(side="left", fill="y")
+
+        text_widget = tk.Text(
+            text_frame,
+            wrap="none",
+            bg="#0d1520",
+            fg="#ffffff",
+            font=("Courier New", 10),
+            selectbackground="#2a4d6e",
+            selectforeground="#ffffff"
+        )
+
+        # Scrollbars
+        vsb = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+        hsb = ttk.Scrollbar(text_frame, orient="horizontal", command=text_widget.xview)
+        text_widget.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        # Pack scrollbars and text
+        vsb.pack(side="right", fill="y")
+        hsb.pack(side="bottom", fill="x")
+        text_widget.pack(side="left", fill="both", expand=True)
+
+        # Load text content in background
+        def load_text():
+            text_content, lines_read = viewer.read_file_as_text(file_path, max_lines=10000)
+            text_widget.delete("1.0", "end")
+            text_widget.insert("1.0", text_content)
+
+            # Add line numbers
+            line_numbers.configure(state="normal")
+            line_numbers.delete("1.0", "end")
+            for i in range(1, min(lines_read + 1, 10001)):
+                line_numbers.insert("end", f"{i:5d}\n")
+            line_numbers.configure(state="disabled")
+
+            text_widget.configure(state="disabled")  # Make read-only
+
+        # Load in thread
+        threading.Thread(target=load_text, daemon=True).start()
+
+    def execute_file(self, file_path, file_name):
+        """Execute file and show results"""
+        viewer = get_viewer_executor()
+
+        # Check if can execute
+        if not viewer.can_execute(file_path):
+            messagebox.showwarning(
+                "Cannot Execute",
+                f"No execution handler for this file type.\n\nSupported: .py, .ps1, .bat, .cmd, .exe, .dll, .js, .vbs, .wsf, .hta"
+            )
+            return
+
+        # Confirmation dialog
+        result = messagebox.askyesno(
+            "Execute File",
+            f"Are you sure you want to execute:\n\n{file_name}\n\nThis file will run on your system!",
+            icon='warning'
+        )
+
+        if not result:
+            return
+
+        # Create results window
+        results_window = ctk.CTkToplevel(self.root)
+        results_window.title(f"Execution: {file_name}")
+        results_window.geometry("1000x600")
+
+        # Main container
+        main_container = ctk.CTkFrame(results_window, fg_color=self.colors["dark_blue"])
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Header
+        header = ctk.CTkFrame(main_container, fg_color=self.colors["navy"], height=60)
+        header.pack(fill="x", padx=0, pady=(0, 10))
+        header.pack_propagate(False)
+
+        title = ctk.CTkLabel(
+            header,
+            text=f"▶️ Executing: {file_name}",
+            font=Fonts.logo_subtitle
+        )
+        title.pack(side="left", padx=20, pady=15)
+
+        # Status label
+        status_label = ctk.CTkLabel(
+            header,
+            text="⏳ Running...",
+            font=Fonts.helper,
+            text_color="#FFA500"
+        )
+        status_label.pack(side="right", padx=20)
+
+        # Output tabs
+        tab_view = ctk.CTkTabview(main_container, fg_color=self.colors["navy"])
+        tab_view.pack(fill="both", expand=True, padx=10, pady=10)
+
+        stdout_tab = tab_view.add("Standard Output")
+        stderr_tab = tab_view.add("Standard Error")
+
+        # Create text widgets for output
+        stdout_text = tk.Text(
+            stdout_tab,
+            wrap="word",
+            bg="#0d1520",
+            fg="#00ff00",
+            font=("Courier New", 10)
+        )
+        stdout_text.pack(fill="both", expand=True, padx=5, pady=5)
+
+        stderr_text = tk.Text(
+            stderr_tab,
+            wrap="word",
+            bg="#0d1520",
+            fg="#ff4444",
+            font=("Courier New", 10)
+        )
+        stderr_text.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # Execute file
+        def on_execution_complete(result):
+            if result.get('success'):
+                output = result.get('output', '')
+                error = result.get('error', '')
+
+                stdout_text.insert("1.0", output if output else "(no output)")
+                stderr_text.insert("1.0", error if error else "(no errors)")
+
+                status_label.configure(text="✅ Complete", text_color="#00ff00")
+            else:
+                error = result.get('error', 'Unknown error')
+                stderr_text.insert("1.0", error)
+                status_label.configure(text="❌ Failed", text_color="#ff4444")
+
+        exec_result = viewer.execute_file(file_path, callback=on_execution_complete)
+
+        if not exec_result.get('success'):
+            messagebox.showerror("Execution Error", exec_result.get('error', 'Unknown error'))
+            results_window.destroy()
 
 
 # Main entry point

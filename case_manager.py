@@ -23,6 +23,13 @@ from urllib.parse import urlparse
 # from utils.file_handler import FileHandler
 # from thq import get_thq_family
 
+# Import script decoder module
+try:
+    from analysis_modules.script_decoder import ScriptDecoder
+except ImportError:
+    print("WARNING: script_decoder module not found. Script decoding will be disabled.")
+    ScriptDecoder = None
+
 
 class CaseManager:
     def __init__(self, yara_rules_path=None, case_storage_path=None, whitelist_path=None):
@@ -335,6 +342,11 @@ class CaseManager:
         threat_level = self.get_threat_level(threat_score)
         print(f"Threat Score: {threat_score} ({threat_level})")
 
+        # Analyze scripts for obfuscation/encoding
+        script_analysis = None
+        if self._is_script_file(file_type, dest_path):
+            script_analysis = self.analyze_script(dest_path, file_type)
+
         # Compile file information
         file_info = {
             "filename": filename,
@@ -355,6 +367,7 @@ class CaseManager:
             "thq_family": thq_family,
             "threat_score": threat_score,
             "threat_level": threat_level,
+            "script_analysis": script_analysis,
             "timestamp": datetime.now().isoformat(),
             "case_id": case_id
         }
@@ -1053,6 +1066,131 @@ Threat Score: {file_info.get('threat_score', 0)} ({file_info.get('threat_level',
         notes_path = os.path.join(case_dir, "case_notes.txt")
         with open(notes_path, 'w', encoding='utf-8') as f:
             f.write(notes)
+
+    def _is_script_file(self, file_type: str, file_path: str) -> bool:
+        """
+        Determine if a file is a script that should be analyzed for obfuscation.
+
+        Args:
+            file_type: Detected file type string
+            file_path: Path to the file
+
+        Returns:
+            True if file should be analyzed as a script
+        """
+        # Check file type
+        script_types = [
+            'HTML document',
+            'Text file',
+            'Shell script',
+            'XML document',
+            'PDF document'  # PDFs often contain JavaScript
+        ]
+
+        if any(stype in file_type for stype in script_types):
+            return True
+
+        # Check file extension
+        script_extensions = ['.js', '.jscript', '.html', '.htm', '.hta', '.vbs',
+                            '.vbe', '.ps1', '.bat', '.cmd', '.wsf', '.wsh']
+        _, ext = os.path.splitext(file_path.lower())
+        if ext in script_extensions:
+            return True
+
+        return False
+
+    def analyze_script(self, file_path: str, file_type: str) -> Optional[Dict]:
+        """
+        Analyze a script file for obfuscation and decode if possible.
+
+        Args:
+            file_path: Path to the script file
+            file_type: Detected file type
+
+        Returns:
+            Dictionary with script analysis results or None if analysis failed
+        """
+        if ScriptDecoder is None:
+            print("  Script decoder not available")
+            return None
+
+        try:
+            print("Analyzing script for obfuscation...")
+
+            # Read the file content
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+
+            # Limit analysis to reasonable file sizes (max 10MB of text)
+            if len(content) > 10 * 1024 * 1024:
+                print("  Script too large for analysis (>10MB)")
+                return {
+                    'analyzed': False,
+                    'reason': 'File too large for analysis'
+                }
+
+            # Determine script type based on file type and extension
+            script_type = 'javascript'  # default
+
+            if 'PDF' in file_type:
+                # PDF JavaScript extraction would need special handling
+                # For now, try to extract JS-like patterns
+                script_type = 'javascript'
+            elif file_path.lower().endswith('.ps1'):
+                script_type = 'powershell'
+            elif file_path.lower().endswith(('.vbs', '.vbe')):
+                script_type = 'vbscript'
+
+            # Analyze the script
+            decoder = ScriptDecoder()
+            results = decoder.analyze_script(content, script_type)
+
+            # Print summary
+            if results.get('techniques_detected'):
+                print(f"  Obfuscation detected: {len(results['techniques_detected'])} technique(s)")
+                for tech in results['techniques_detected'][:3]:  # Show first 3
+                    print(f"    - {tech}")
+            else:
+                print("  No obfuscation detected")
+
+            if results.get('iocs_found'):
+                print(f"  IOCs extracted: {len(results['iocs_found'])}")
+                for ioc in results['iocs_found'][:3]:  # Show first 3
+                    print(f"    - {ioc['type']}: {ioc['value']}")
+
+            if results.get('suspicious_patterns'):
+                print(f"  Suspicious patterns: {len(results['suspicious_patterns'])}")
+
+            # Don't store the full original/decoded content in the results
+            # (it can be very large), just store metadata
+            summary = {
+                'analyzed': True,
+                'script_type': script_type,
+                'original_size': len(content),
+                'decoded_size': len(results.get('decoded_content', '')),
+                'techniques_detected': results.get('techniques_detected', []),
+                'iocs_found': results.get('iocs_found', []),
+                'suspicious_patterns': results.get('suspicious_patterns', []),
+                'decode_layers': results.get('decode_layers', []),
+                'content_changed': content != results.get('decoded_content', content)
+            }
+
+            # Save decoded content to a separate file if it changed
+            if summary['content_changed']:
+                decoded_path = file_path + '_decoded.txt'
+                with open(decoded_path, 'w', encoding='utf-8', errors='ignore') as f:
+                    f.write(results['decoded_content'])
+                summary['decoded_file'] = decoded_path
+                print(f"  Decoded content saved to: {os.path.basename(decoded_path)}")
+
+            return summary
+
+        except Exception as e:
+            print(f"  Error analyzing script: {str(e)}")
+            return {
+                'analyzed': False,
+                'error': str(e)
+            }
 
     def save_file_details(self, storage_dir: str, filename: str, file_info: Dict):
         """

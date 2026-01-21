@@ -2879,6 +2879,35 @@ File Size: {file_info['file_size']} bytes"""
         execute_suspended_btn.pack(side="left", padx=5)
         execute_suspended_btn.bind("<Button-1>", execute_suspended_click)
 
+        # Delete File button
+        def delete_file_click(event):
+            file_path = file_info.get('storage_path', '')
+            file_name = file_info['filename']
+
+            # Confirmation dialog
+            result = messagebox.askyesno(
+                "Delete File",
+                f"Are you sure you want to delete this file from the case?\n\n{file_name}\n\nThis will remove it from disk and the case.",
+                icon='warning'
+            )
+
+            if result:
+                self.delete_file_from_case(file_info, card_frame)
+            return "break"
+
+        delete_btn = ctk.CTkButton(
+            buttons_row,
+            text="🗑 Delete",
+            width=100,
+            height=28,
+            font=Fonts.helper,
+            fg_color="#8B0000",  # Dark red for danger
+            hover_color="#5c0000",
+            cursor="hand2"
+        )
+        delete_btn.pack(side="left", padx=5)
+        delete_btn.bind("<Button-1>", delete_file_click)
+
         def toggle_details(event=None):
             if details_visible[0]:
                 details_frame.pack_forget()
@@ -2955,7 +2984,74 @@ File Size: {file_info['file_size']} bytes"""
 
         text_widget.configure(state="disabled")  # Make read-only
         text_widget.pack(fill="both", expand=True)
-    
+
+    def delete_file_from_case(self, file_info, card_frame):
+        """
+        Delete a file from the current case.
+
+        Args:
+            file_info: Dictionary containing file information
+            card_frame: The GUI frame/card to remove
+        """
+        try:
+            file_path = file_info.get('storage_path', '')
+            file_name = file_info['filename']
+
+            # Remove file from disk
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"✓ Deleted file: {file_path}")
+
+                # Also remove the _details.json file
+                details_path = file_path + "_details.json"
+                if os.path.exists(details_path):
+                    os.remove(details_path)
+
+                # Remove decoded file if exists
+                decoded_path = file_path + "_decoded.txt"
+                if os.path.exists(decoded_path):
+                    os.remove(decoded_path)
+
+            # Remove from current case files list
+            if file_info in self.current_case["files"]:
+                self.current_case["files"].remove(file_info)
+
+            # Update case statistics
+            if not file_info.get("whitelisted", False):
+                # Subtract YARA matches
+                yara_matches = file_info.get("yara_matches", [])
+                if yara_matches:
+                    self.current_case["files_with_yara"] = max(0, self.current_case.get("files_with_yara", 0) - 1)
+
+                # Subtract THQ family
+                thq_family = file_info.get("thq_family", "")
+                if thq_family and thq_family not in ["Unknown", "N/A"]:
+                    self.current_case["files_with_thq"] = max(0, self.current_case.get("files_with_thq", 0) - 1)
+
+                # Subtract VT hits
+                vt_hits = file_info.get("vt_hits", 0)
+                if vt_hits > 0:
+                    self.current_case["files_with_vt"] = max(0, self.current_case.get("files_with_vt", 0) - 1)
+                    self.current_case["total_vt_hits"] = max(0, self.current_case.get("total_vt_hits", 0) - vt_hits)
+
+            # Save updated case metadata
+            if self.current_case and self.current_case.get("id"):
+                case_dir = os.path.join(self.case_manager.case_storage_path, self.current_case["id"])
+                self.case_manager.save_case_metadata(case_dir, self.current_case)
+
+            # Remove the card from display
+            card_frame.destroy()
+
+            # Update stats display
+            self.update_current_case_display()
+
+            # Show success message
+            messagebox.showinfo("File Deleted", f"Successfully deleted {file_name} from the case.")
+
+        except Exception as e:
+            messagebox.showerror("Delete Error", f"Failed to delete file:\n\n{str(e)}")
+            print(f"Error deleting file: {e}")
+
     # ==================== APPLICATION LIFECYCLE ====================
     def run(self):
         """Start the application"""

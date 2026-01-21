@@ -2718,38 +2718,55 @@ class ForensicAnalysisGUI:
             cursor="hand2"
         )
         info_label.pack(anchor="w", pady=(2, 0))
-        
-        # Right side - copy button and expand indicator
+
+        # Right side - expand indicator only
         right_frame = ctk.CTkFrame(header_frame, fg_color="transparent", cursor="hand2")
         right_frame.grid(row=0, column=1, sticky="e", padx=(10, 0))
-        
+
+        # Expand/Collapse indicator
+        details_visible = [False]
+        details_frame = ctk.CTkFrame(card_frame, fg_color="#0d1520", height=200)
+
+        expand_indicator = ctk.CTkLabel(
+            right_frame,
+            text="▼",
+            font=Fonts.body_large,
+            text_color="gray60",
+            cursor="hand2"
+        )
+        expand_indicator.pack(side="top")
+
+        # Buttons row (horizontal layout below header)
+        buttons_row = ctk.CTkFrame(card_frame, fg_color="transparent")
+        buttons_row.pack(fill="x", padx=15, pady=(0, 12))
+
         # Copy details button
         def copy_details(event):
             copy_text = f"""File Name: {file_info['filename']}
 MD5: {file_info['md5']}
 SHA256: {file_info['sha256']}
 File Size: {file_info['file_size']} bytes"""
-            
+
             self.root.clipboard_clear()
             self.root.clipboard_append(copy_text)
             self.root.update()
-            
+
             original_text = copy_btn.cget("text")
             copy_btn.configure(text="✓ Copied!")
             self.root.after(1500, lambda: copy_btn.configure(text=original_text))
             return "break"
-        
+
         copy_btn = ctk.CTkButton(
-            right_frame,
-            text="📋 Copy Details",
-            width=120,
+            buttons_row,
+            text="📋 Copy",
+            width=100,
             height=28,
             font=Fonts.helper,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"],
             cursor="hand2"
         )
-        copy_btn.pack(side="top", pady=(0, 5))
+        copy_btn.pack(side="left", padx=(0, 5))
         copy_btn.bind("<Button-1>", copy_details)
 
         # View Strings button
@@ -2763,9 +2780,9 @@ File Size: {file_info['file_size']} bytes"""
             return "break"
 
         view_strings_btn = ctk.CTkButton(
-            right_frame,
-            text="📄 View Strings",
-            width=120,
+            buttons_row,
+            text="📄 Strings",
+            width=100,
             height=28,
             font=Fonts.helper,
             fg_color="transparent",
@@ -2774,7 +2791,7 @@ File Size: {file_info['file_size']} bytes"""
             hover_color=self.colors["navy"],
             cursor="hand2"
         )
-        view_strings_btn.pack(side="top", pady=(0, 5))
+        view_strings_btn.pack(side="left", padx=5)
         view_strings_btn.bind("<Button-1>", view_strings_click)
 
         # View File button
@@ -2794,9 +2811,9 @@ File Size: {file_info['file_size']} bytes"""
             return "break"
 
         view_file_btn = ctk.CTkButton(
-            right_frame,
-            text="👁 View File",
-            width=120,
+            buttons_row,
+            text="👁 View",
+            width=90,
             height=28,
             font=Fonts.helper,
             fg_color="transparent",
@@ -2805,7 +2822,7 @@ File Size: {file_info['file_size']} bytes"""
             hover_color=self.colors["navy"],
             cursor="hand2"
         )
-        view_file_btn.pack(side="top", pady=(0, 5))
+        view_file_btn.pack(side="left", padx=5)
         view_file_btn.bind("<Button-1>", view_file_click)
 
         # Execute File button
@@ -2818,16 +2835,16 @@ File Size: {file_info['file_size']} bytes"""
             return "break"
 
         execute_file_btn = ctk.CTkButton(
-            right_frame,
+            buttons_row,
             text="▶️ Execute",
-            width=120,
+            width=110,
             height=28,
             font=Fonts.helper,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"],
             cursor="hand2"
         )
-        execute_file_btn.pack(side="top", pady=(0, 5))
+        execute_file_btn.pack(side="left", padx=5)
         execute_file_btn.bind("<Button-1>", execute_file_click)
 
         # Execute (Suspended) button
@@ -2847,8 +2864,8 @@ File Size: {file_info['file_size']} bytes"""
             return "break"
 
         execute_suspended_btn = ctk.CTkButton(
-            right_frame,
-            text="⏸ Execute (Suspended)",
+            buttons_row,
+            text="⏸ Suspended",
             width=120,
             height=28,
             font=Fonts.helper,
@@ -2859,22 +2876,9 @@ File Size: {file_info['file_size']} bytes"""
             hover_color=self.colors["navy"],
             cursor="hand2"
         )
-        execute_suspended_btn.pack(side="top", pady=(0, 5))
+        execute_suspended_btn.pack(side="left", padx=5)
         execute_suspended_btn.bind("<Button-1>", execute_suspended_click)
 
-        # Expand/Collapse indicator
-        details_visible = [False]
-        details_frame = ctk.CTkFrame(card_frame, fg_color="#0d1520", height=200)
-        
-        expand_indicator = ctk.CTkLabel(
-            right_frame,
-            text="▼",
-            font=Fonts.body_large,
-            text_color="gray60",
-            cursor="hand2"
-        )
-        expand_indicator.pack(side="top")
-        
         def toggle_details(event=None):
             if details_visible[0]:
                 details_frame.pack_forget()
@@ -3261,6 +3265,40 @@ File Size: {file_info['file_size']} bytes"""
         # Mark initial load as complete
         if self.process_tree_initial_load:
             self.process_tree_initial_load = False
+
+    def focus_process_by_pid(self, target_pid):
+        """
+        Focus on a specific process in the tree by PID, expanding parents as needed.
+
+        Args:
+            target_pid: PID of the process to focus on
+        """
+        try:
+            # Check if PID exists in tree
+            if target_pid not in self.pid_to_tree_item:
+                print(f"PID {target_pid} not found in process tree yet")
+                # Try refreshing and checking again after a delay
+                self.refresh_process_tree()
+                self.root.after(1000, lambda: self.focus_process_by_pid(target_pid))
+                return
+
+            item_id = self.pid_to_tree_item[target_pid]
+
+            # Expand all parent items
+            parent = self.process_tree.parent(item_id)
+            while parent:
+                self.process_tree.item(parent, open=True)
+                parent = self.process_tree.parent(parent)
+
+            # Select and scroll to the item
+            self.process_tree.selection_set(item_id)
+            self.process_tree.see(item_id)
+            self.process_tree.focus(item_id)
+
+            print(f"✓ Focused on process PID {target_pid}")
+
+        except Exception as e:
+            print(f"Error focusing on PID {target_pid}: {e}")
 
     def should_show_popup(self, rule_name):
         """
@@ -5764,23 +5802,28 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
             messagebox.showerror("Execution Error", exec_result.get('error', 'Unknown error'))
             return
 
+        # Get PID for focusing
+        pid = exec_result.get('pid', None)
+
         # Show success message with PID if available
         if suspended:
-            pid = exec_result.get('pid', 'Unknown')
             messagebox.showinfo(
                 "Process Created",
-                f"Process created in SUSPENDED state!\n\nPID: {pid}\nFile: {file_name}\n\nSwitch to Analysis tab to monitor process activity."
+                f"Process created in SUSPENDED state!\n\nPID: {pid}\nFile: {file_name}\n\nSwitching to Analysis tab..."
             )
         else:
-            pid = exec_result.get('pid', 'Unknown')
-            if pid != 'Unknown':
+            if pid:
                 messagebox.showinfo(
                     "Process Launched",
-                    f"Process launched successfully!\n\nPID: {pid}\nFile: {file_name}\n\nSwitch to Analysis tab to monitor process activity."
+                    f"Process launched successfully!\n\nPID: {pid}\nFile: {file_name}\n\nSwitching to Analysis tab..."
                 )
 
         # Switch to Analysis tab
         self.show_tab("analysis")
+
+        # Focus on the executed process (with slight delay to allow tree to refresh)
+        if pid:
+            self.root.after(500, lambda: self.focus_process_by_pid(pid))
 
 
 # Main entry point

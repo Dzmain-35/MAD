@@ -14,6 +14,7 @@ from analysis_modules.network_monitor import NetworkMonitor
 from analysis_modules.procmon_events import ProcmonLiveMonitor, ProcmonEvent
 from analysis_modules.system_wide_monitor import SystemWideMonitor, EventFilter
 from analysis_modules.sysmon_parser import SysmonLogMonitor
+from analysis_modules.file_viewer_executor import get_viewer_executor
 import tkinter as tk
 from tkinter import ttk
 import re
@@ -2782,38 +2783,55 @@ class ForensicAnalysisGUI:
             cursor="hand2"
         )
         info_label.pack(anchor="w", pady=(2, 0))
-        
-        # Right side - copy button and expand indicator
+
+        # Right side - expand indicator only
         right_frame = ctk.CTkFrame(header_frame, fg_color="transparent", cursor="hand2")
         right_frame.grid(row=0, column=1, sticky="e", padx=(10, 0))
-        
+
+        # Expand/Collapse indicator
+        details_visible = [False]
+        details_frame = ctk.CTkFrame(card_frame, fg_color="#0d1520", height=200)
+
+        expand_indicator = ctk.CTkLabel(
+            right_frame,
+            text="▼",
+            font=Fonts.body_large,
+            text_color="gray60",
+            cursor="hand2"
+        )
+        expand_indicator.pack(side="top")
+
+        # Buttons row (horizontal layout below header)
+        buttons_row = ctk.CTkFrame(card_frame, fg_color="transparent")
+        buttons_row.pack(fill="x", padx=15, pady=(0, 12))
+
         # Copy details button
         def copy_details(event):
             copy_text = f"""File Name: {file_info['filename']}
 MD5: {file_info['md5']}
 SHA256: {file_info['sha256']}
 File Size: {file_info['file_size']} bytes"""
-            
+
             self.root.clipboard_clear()
             self.root.clipboard_append(copy_text)
             self.root.update()
-            
+
             original_text = copy_btn.cget("text")
             copy_btn.configure(text="✓ Copied!")
             self.root.after(1500, lambda: copy_btn.configure(text=original_text))
             return "break"
-        
+
         copy_btn = ctk.CTkButton(
-            right_frame,
-            text="📋 Copy Details",
-            width=120,
+            buttons_row,
+            text="📋 Copy",
+            width=100,
             height=28,
             font=Fonts.helper,
             fg_color=self.colors["red"],
             hover_color=self.colors["red_dark"],
             cursor="hand2"
         )
-        copy_btn.pack(side="top", pady=(0, 5))
+        copy_btn.pack(side="left", padx=(0, 5))
         copy_btn.bind("<Button-1>", copy_details)
 
         # View Strings button
@@ -2827,9 +2845,9 @@ File Size: {file_info['file_size']} bytes"""
             return "break"
 
         view_strings_btn = ctk.CTkButton(
-            right_frame,
-            text="📄 View Strings",
-            width=120,
+            buttons_row,
+            text="📄 Strings",
+            width=100,
             height=28,
             font=Fonts.helper,
             fg_color="transparent",
@@ -2838,22 +2856,123 @@ File Size: {file_info['file_size']} bytes"""
             hover_color=self.colors["navy"],
             cursor="hand2"
         )
-        view_strings_btn.pack(side="top", pady=(0, 5))
+        view_strings_btn.pack(side="left", padx=5)
         view_strings_btn.bind("<Button-1>", view_strings_click)
 
-        # Expand/Collapse indicator
-        details_visible = [False]
-        details_frame = ctk.CTkFrame(card_frame, fg_color="#0d1520", height=200)
-        
-        expand_indicator = ctk.CTkLabel(
-            right_frame,
-            text="▼",
-            font=Fonts.body_large,
-            text_color="gray60",
+        # View File button
+        def view_file_click(event):
+            file_path = file_info.get('storage_path', '')
+            if file_path and os.path.exists(file_path):
+                # Determine if file is likely text or binary
+                viewer = get_viewer_executor()
+                info = viewer.get_file_info(file_path)
+
+                if info.get('is_text', False):
+                    self.view_file_text(file_path, file_info['filename'])
+                else:
+                    self.view_file_hex(file_path, file_info['filename'])
+            else:
+                messagebox.showerror("File Not Found", f"File not found: {file_path}")
+            return "break"
+
+        view_file_btn = ctk.CTkButton(
+            buttons_row,
+            text="👁 View",
+            width=90,
+            height=28,
+            font=Fonts.helper,
+            fg_color="transparent",
+            border_width=2,
+            border_color=self.colors["red"],
+            hover_color=self.colors["navy"],
             cursor="hand2"
         )
-        expand_indicator.pack(side="top")
-        
+        view_file_btn.pack(side="left", padx=5)
+        view_file_btn.bind("<Button-1>", view_file_click)
+
+        # Execute File button
+        def execute_file_click(event):
+            file_path = file_info.get('storage_path', '')
+            if file_path and os.path.exists(file_path):
+                self.execute_file(file_path, file_info['filename'])
+            else:
+                messagebox.showerror("File Not Found", f"File not found: {file_path}")
+            return "break"
+
+        execute_file_btn = ctk.CTkButton(
+            buttons_row,
+            text="▶️ Execute",
+            width=110,
+            height=28,
+            font=Fonts.helper,
+            fg_color=self.colors["red"],
+            hover_color=self.colors["red_dark"],
+            cursor="hand2"
+        )
+        execute_file_btn.pack(side="left", padx=5)
+        execute_file_btn.bind("<Button-1>", execute_file_click)
+
+        # Execute (Suspended) button
+        def execute_suspended_click(event):
+            file_path = file_info.get('storage_path', '')
+            if file_path and os.path.exists(file_path):
+                # Check if file is EXE or MSI (only these support suspended execution)
+                if file_path.lower().endswith(('.exe', '.msi')):
+                    self.execute_file(file_path, file_info['filename'], suspended=True)
+                else:
+                    messagebox.showinfo(
+                        "Not Supported",
+                        "Suspended execution is only supported for EXE and MSI files."
+                    )
+            else:
+                messagebox.showerror("File Not Found", f"File not found: {file_path}")
+            return "break"
+
+        execute_suspended_btn = ctk.CTkButton(
+            buttons_row,
+            text="⏸ Suspended",
+            width=120,
+            height=28,
+            font=Fonts.helper,
+            fg_color="transparent",
+            border_width=2,
+            border_color="#FFA500",
+            text_color="#FFA500",
+            hover_color=self.colors["navy"],
+            cursor="hand2"
+        )
+        execute_suspended_btn.pack(side="left", padx=5)
+        execute_suspended_btn.bind("<Button-1>", execute_suspended_click)
+
+        # Delete File button
+        def delete_file_click(event):
+            file_path = file_info.get('storage_path', '')
+            file_name = file_info['filename']
+
+            # Confirmation dialog
+            result = messagebox.askyesno(
+                "Delete File",
+                f"Are you sure you want to delete this file from the case?\n\n{file_name}\n\nThis will remove it from disk and the case.",
+                icon='warning'
+            )
+
+            if result:
+                self.delete_file_from_case(file_info, card_frame)
+            return "break"
+
+        delete_btn = ctk.CTkButton(
+            buttons_row,
+            text="🗑 Delete",
+            width=100,
+            height=28,
+            font=Fonts.helper,
+            fg_color="#8B0000",  # Dark red for danger
+            hover_color="#5c0000",
+            cursor="hand2"
+        )
+        delete_btn.pack(side="left", padx=5)
+        delete_btn.bind("<Button-1>", delete_file_click)
+
         def toggle_details(event=None):
             if details_visible[0]:
                 details_frame.pack_forget()
@@ -2931,6 +3050,72 @@ File Size: {file_info['file_size']} bytes"""
         text_widget.configure(state="disabled")  # Make read-only
         text_widget.pack(fill="both", expand=True)
 
+    def delete_file_from_case(self, file_info, card_frame):
+        """
+        Delete a file from the current case.
+
+        Args:
+            file_info: Dictionary containing file information
+            card_frame: The GUI frame/card to remove
+        """
+        try:
+            file_path = file_info.get('storage_path', '')
+            file_name = file_info['filename']
+
+            # Remove file from disk
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"✓ Deleted file: {file_path}")
+
+                # Also remove the _details.json file
+                details_path = file_path + "_details.json"
+                if os.path.exists(details_path):
+                    os.remove(details_path)
+
+                # Remove decoded file if exists
+                decoded_path = file_path + "_decoded.txt"
+                if os.path.exists(decoded_path):
+                    os.remove(decoded_path)
+
+            # Remove from current case files list
+            if file_info in self.current_case["files"]:
+                self.current_case["files"].remove(file_info)
+
+            # Update case statistics
+            if not file_info.get("whitelisted", False):
+                # Subtract YARA matches
+                yara_matches = file_info.get("yara_matches", [])
+                if yara_matches:
+                    self.current_case["files_with_yara"] = max(0, self.current_case.get("files_with_yara", 0) - 1)
+
+                # Subtract THQ family
+                thq_family = file_info.get("thq_family", "")
+                if thq_family and thq_family not in ["Unknown", "N/A"]:
+                    self.current_case["files_with_thq"] = max(0, self.current_case.get("files_with_thq", 0) - 1)
+
+                # Subtract VT hits
+                vt_hits = file_info.get("vt_hits", 0)
+                if vt_hits > 0:
+                    self.current_case["files_with_vt"] = max(0, self.current_case.get("files_with_vt", 0) - 1)
+                    self.current_case["total_vt_hits"] = max(0, self.current_case.get("total_vt_hits", 0) - vt_hits)
+
+            # Save updated case metadata
+            if self.current_case and self.current_case.get("id"):
+                case_dir = os.path.join(self.case_manager.case_storage_path, self.current_case["id"])
+                self.case_manager.save_case_metadata(case_dir, self.current_case)
+
+            # Remove the card from display
+            card_frame.destroy()
+
+            # Update stats display
+            self.update_current_case_display()
+
+            # Show success message
+            messagebox.showinfo("File Deleted", f"Successfully deleted {file_name} from the case.")
+
+        except Exception as e:
+            messagebox.showerror("Delete Error", f"Failed to delete file:\n\n{str(e)}")
+            print(f"Error deleting file: {e}")
     # ==================== YARA RULES TAB ====================
     def create_yara_rules_tab(self):
         """Create the YARA Rules Management tab"""
@@ -4025,6 +4210,40 @@ File Size: {file_info['file_size']} bytes"""
         # Mark initial load as complete
         if self.process_tree_initial_load:
             self.process_tree_initial_load = False
+
+    def focus_process_by_pid(self, target_pid):
+        """
+        Focus on a specific process in the tree by PID, expanding parents as needed.
+
+        Args:
+            target_pid: PID of the process to focus on
+        """
+        try:
+            # Check if PID exists in tree
+            if target_pid not in self.pid_to_tree_item:
+                print(f"PID {target_pid} not found in process tree yet")
+                # Try refreshing and checking again after a delay
+                self.refresh_process_tree()
+                self.root.after(1000, lambda: self.focus_process_by_pid(target_pid))
+                return
+
+            item_id = self.pid_to_tree_item[target_pid]
+
+            # Expand all parent items
+            parent = self.process_tree.parent(item_id)
+            while parent:
+                self.process_tree.item(parent, open=True)
+                parent = self.process_tree.parent(parent)
+
+            # Select and scroll to the item
+            self.process_tree.selection_set(item_id)
+            self.process_tree.see(item_id)
+            self.process_tree.focus(item_id)
+
+            print(f"✓ Focused on process PID {target_pid}")
+
+        except Exception as e:
+            print(f"Error focusing on PID {target_pid}: {e}")
 
     def should_show_popup(self, rule_name):
         """
@@ -6328,6 +6547,228 @@ Risk Level: {risk_level}"""
 Active: {summary['active_connections']} | Total: {summary['total_connections']} | Suspicious: {summary['suspicious_connections']}
 Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_local_ports']}"""
             self.network_stats_label.configure(text=stats_text)
+
+    # ==================== FILE VIEWER AND EXECUTOR ====================
+    def view_file_hex(self, file_path, file_name):
+        """View file in hex format"""
+        viewer = get_viewer_executor()
+
+        # Create window
+        hex_window = ctk.CTkToplevel(self.root)
+        hex_window.title(f"Hex View: {file_name}")
+        hex_window.geometry("1200x700")
+
+        # Main container
+        main_container = ctk.CTkFrame(hex_window, fg_color=self.colors["dark_blue"])
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Header
+        header = ctk.CTkFrame(main_container, fg_color=self.colors["navy"], height=60)
+        header.pack(fill="x", padx=0, pady=(0, 10))
+        header.pack_propagate(False)
+
+        title = ctk.CTkLabel(
+            header,
+            text=f"🔍 Hex View: {file_name}",
+            font=Fonts.logo_subtitle
+        )
+        title.pack(side="left", padx=20, pady=15)
+
+        # File info
+        file_info = viewer.get_file_info(file_path)
+        info_text = f"Size: {file_info.get('size_kb', 0):.2f} KB"
+        info_label = ctk.CTkLabel(
+            header,
+            text=info_text,
+            font=Fonts.helper,
+            text_color="gray60"
+        )
+        info_label.pack(side="right", padx=20)
+
+        # Text display with scrollbar
+        text_frame = ctk.CTkFrame(main_container, fg_color=self.colors["navy"])
+        text_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Create text widget
+        hex_text = tk.Text(
+            text_frame,
+            wrap="none",
+            bg="#0d1520",
+            fg="#ffffff",
+            font=("Courier New", 10),
+            selectbackground="#2a4d6e",
+            selectforeground="#ffffff"
+        )
+
+        # Scrollbars
+        vsb = ttk.Scrollbar(text_frame, orient="vertical", command=hex_text.yview)
+        hsb = ttk.Scrollbar(text_frame, orient="horizontal", command=hex_text.xview)
+        hex_text.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        # Pack scrollbars and text
+        vsb.pack(side="right", fill="y")
+        hsb.pack(side="bottom", fill="x")
+        hex_text.pack(side="left", fill="both", expand=True)
+
+        # Load hex content in background
+        def load_hex():
+            hex_content, bytes_read = viewer.read_file_as_hex(file_path, max_bytes=1024*1024)  # 1MB max
+            hex_text.delete("1.0", "end")
+            hex_text.insert("1.0", hex_content)
+            hex_text.configure(state="disabled")  # Make read-only
+
+            if bytes_read >= 1024*1024:
+                hex_text.insert("end", f"\n\n... (showing first 1MB of {file_info.get('size_mb', 0):.2f} MB)")
+
+        # Load in thread to avoid freezing GUI
+        threading.Thread(target=load_hex, daemon=True).start()
+
+    def view_file_text(self, file_path, file_name):
+        """View file as text"""
+        viewer = get_viewer_executor()
+
+        # Create window
+        text_window = ctk.CTkToplevel(self.root)
+        text_window.title(f"Text View: {file_name}")
+        text_window.geometry("1200x700")
+
+        # Main container
+        main_container = ctk.CTkFrame(text_window, fg_color=self.colors["dark_blue"])
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Header
+        header = ctk.CTkFrame(main_container, fg_color=self.colors["navy"], height=60)
+        header.pack(fill="x", padx=0, pady=(0, 10))
+        header.pack_propagate(False)
+
+        title = ctk.CTkLabel(
+            header,
+            text=f"📄 Text View: {file_name}",
+            font=Fonts.logo_subtitle
+        )
+        title.pack(side="left", padx=20, pady=15)
+
+        # File info
+        file_info = viewer.get_file_info(file_path)
+        info_text = f"Size: {file_info.get('size_kb', 0):.2f} KB"
+        info_label = ctk.CTkLabel(
+            header,
+            text=info_text,
+            font=Fonts.helper,
+            text_color="gray60"
+        )
+        info_label.pack(side="right", padx=20)
+
+        # Text display with scrollbar
+        text_frame = ctk.CTkFrame(main_container, fg_color=self.colors["navy"])
+        text_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Create text widget with line numbers
+        line_frame = tk.Frame(text_frame, bg="#0d1520")
+        line_frame.pack(side="left", fill="y")
+
+        line_numbers = tk.Text(
+            line_frame,
+            width=6,
+            wrap="none",
+            bg="#1a2332",
+            fg="gray60",
+            font=("Courier New", 10),
+            state="disabled",
+            takefocus=0
+        )
+        line_numbers.pack(side="left", fill="y")
+
+        text_widget = tk.Text(
+            text_frame,
+            wrap="none",
+            bg="#0d1520",
+            fg="#ffffff",
+            font=("Courier New", 10),
+            selectbackground="#2a4d6e",
+            selectforeground="#ffffff"
+        )
+
+        # Scrollbars
+        vsb = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+        hsb = ttk.Scrollbar(text_frame, orient="horizontal", command=text_widget.xview)
+        text_widget.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        # Pack scrollbars and text
+        vsb.pack(side="right", fill="y")
+        hsb.pack(side="bottom", fill="x")
+        text_widget.pack(side="left", fill="both", expand=True)
+
+        # Load text content in background
+        def load_text():
+            text_content, lines_read = viewer.read_file_as_text(file_path, max_lines=10000)
+            text_widget.delete("1.0", "end")
+            text_widget.insert("1.0", text_content)
+
+            # Add line numbers
+            line_numbers.configure(state="normal")
+            line_numbers.delete("1.0", "end")
+            for i in range(1, min(lines_read + 1, 10001)):
+                line_numbers.insert("end", f"{i:5d}\n")
+            line_numbers.configure(state="disabled")
+
+            text_widget.configure(state="disabled")  # Make read-only
+
+        # Load in thread
+        threading.Thread(target=load_text, daemon=True).start()
+
+    def execute_file(self, file_path, file_name, suspended=False):
+        """Execute file and redirect to Analysis tab"""
+        viewer = get_viewer_executor()
+
+        # Check if can execute
+        if not viewer.can_execute(file_path):
+            messagebox.showwarning(
+                "Cannot Execute",
+                f"No execution handler for this file type.\n\nSupported: .py, .ps1, .bat, .cmd, .exe, .dll, .msi, .js, .vbs, .wsf, .hta"
+            )
+            return
+
+        # Confirmation dialog
+        mode_text = "in SUSPENDED state" if suspended else ""
+        result = messagebox.askyesno(
+            "Execute File",
+            f"Are you sure you want to execute {mode_text}:\n\n{file_name}\n\nThis file will run on your system!",
+            icon='warning'
+        )
+
+        if not result:
+            return
+
+        # Execute the file
+        exec_result = viewer.execute_file(file_path, suspended=suspended)
+
+        if not exec_result.get('success'):
+            messagebox.showerror("Execution Error", exec_result.get('error', 'Unknown error'))
+            return
+
+        # Get PID for focusing
+        pid = exec_result.get('pid', None)
+
+        # Show success message with PID if available
+        if suspended:
+            messagebox.showinfo(
+                "Process Created",
+                f"Process created in SUSPENDED state!\n\nPID: {pid}\nFile: {file_name}\n\nSwitching to Analysis tab..."
+            )
+        else:
+            if pid:
+                messagebox.showinfo(
+                    "Process Launched",
+                    f"Process launched successfully!\n\nPID: {pid}\nFile: {file_name}\n\nSwitching to Analysis tab..."
+                )
+
+        # Switch to Analysis tab
+        self.show_tab("analysis")
+
+        # Focus on the executed process (with slight delay to allow tree to refresh)
+        if pid:
+            self.root.after(500, lambda: self.focus_process_by_pid(pid))
 
 
 # Main entry point

@@ -25,14 +25,18 @@ from urllib.parse import urlparse
 
 
 class CaseManager:
-    def __init__(self, yara_rules_path=None, case_storage_path=None, whitelist_path=None):
+    def __init__(self, yara_rules_path=None, case_storage_path=None, whitelist_path=None,
+                 vt_api_key=None, threathq_user=None, threathq_pass=None):
         """
         Initialize Case Manager
-        
+
         Args:
             yara_rules_path: Path to YARA rules directory (if None, will look in common locations)
             case_storage_path: Path where cases will be stored (if None, uses Desktop/MAD_Cases)
             whitelist_path: Path to whitelist.txt file with SHA256 hashes
+            vt_api_key: VirusTotal API key (if None, uses default)
+            threathq_user: ThreatHQ username (if None, uses default)
+            threathq_pass: ThreatHQ password (if None, uses default)
         """
         # Auto-detect YARA rules path if not provided
         if yara_rules_path is None:
@@ -107,7 +111,12 @@ class CaseManager:
         self.yara_rules_path = yara_rules_path
         self.case_storage_path = case_storage_path
         self.whitelist_path = whitelist_path
-        self.vt_api_key = "93aa3b4a6ba88ba96734df3e73147f89ecfd63164f3eacd240c1ff6e592d9d49"
+
+        # API keys - use provided values or fall back to defaults
+        self.vt_api_key = vt_api_key or "93aa3b4a6ba88ba96734df3e73147f89ecfd63164f3eacd240c1ff6e592d9d49"
+        self.threathq_user = threathq_user or "088611ff43c14dcbb8ce10af714872b4"
+        self.threathq_pass = threathq_pass or "5ea7fba6ebff4158a0469b47a49c2895"
+
         self.current_case = None
         self.yara_rules = None
         self.whitelisted_hashes = set()
@@ -644,19 +653,17 @@ class CaseManager:
     def get_thq_family(self, md5_hash: str) -> str:
         """
         Get THQ family classification using ThreatHQ API
-        
+
         Args:
             md5_hash: MD5 hash of the file
-            
+
         Returns:
             THQ family name
         """
         try:
-            thquser = "088611ff43c14dcbb8ce10af714872b4"
-            thqpass = "5ea7fba6ebff4158a0469b47a49c2895"
             url = f"https://www.threathq.com/apiv1/threat/search/?malwareArtifactMD5={md5_hash}"
-            
-            response = requests.post(url, auth=(thquser, thqpass), timeout=10)
+
+            response = requests.post(url, auth=(self.threathq_user, self.threathq_pass), timeout=10)
             
             if response.status_code == 200:
                 data = response.json()

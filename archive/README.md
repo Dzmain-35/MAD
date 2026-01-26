@@ -8,8 +8,6 @@ These files are preserved for reference but are not actively used in the project
 Monitor modules that were not being used in the main application:
 
 - `process_activity_monitor.py` - Per-process activity monitoring (347 lines, never imported)
-- `system_wide_monitor.py` - System-wide monitoring (600 lines, test-only usage)
-- `procmon_events.py` - Procmon-style event monitoring (513 lines, test-only usage)
 - `process_memory_tree_filtered.py` - Process memory filtering (484 lines, never imported)
 
 ## test_scripts/

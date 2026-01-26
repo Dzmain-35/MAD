@@ -13,14 +13,56 @@ from datetime import datetime
 class YaraRuleManager:
     """Manager for YARA rules with validation and file operations"""
 
-    def __init__(self, yara_rules_path: str):
+    def __init__(self, yara_rules_path: str, settings_manager=None):
         """
         Initialize the YARA Rule Manager
 
         Args:
             yara_rules_path: Path to the YDAMN directory containing YARA rules
+            settings_manager: Optional SettingsManager instance for network sync
         """
         self.yara_rules_path = Path(yara_rules_path)
+        self.settings_manager = settings_manager
+
+    def _sync_rule_to_network(self, rule_name: str, rule_content: str) -> Tuple[bool, str]:
+        """
+        Sync a YARA rule to the network folder
+
+        Args:
+            rule_name: Name of the rule file
+            rule_content: Content of the rule
+
+        Returns:
+            Tuple of (success, message)
+        """
+        if not self.settings_manager:
+            return True, ""  # No settings manager, skip silently
+
+        if not self.settings_manager.get("network.enable_network_yara_sync", False):
+            return True, ""  # Network sync disabled, skip silently
+
+        network_path = self.settings_manager.get("network.network_yara_path", "")
+        if not network_path:
+            return True, ""  # No network path configured, skip silently
+
+        try:
+            import os
+            # Ensure network directory exists
+            os.makedirs(network_path, exist_ok=True)
+
+            # Ensure rule name has extension
+            if not rule_name.endswith('.yara') and not rule_name.endswith('.yar'):
+                rule_name += '.yara'
+
+            # Write rule to network path
+            network_rule_path = os.path.join(network_path, rule_name)
+            with open(network_rule_path, 'w', encoding='utf-8') as f:
+                f.write(rule_content)
+
+            return True, f"Synced to network: {network_rule_path}"
+
+        except Exception as e:
+            return False, f"Network sync failed: {str(e)}"
 
     def validate_yara_rule(self, rule_content: str) -> Tuple[bool, str]:
         """
@@ -100,6 +142,14 @@ class YaraRuleManager:
             # Write rule to file
             with open(rule_path, 'w', encoding='utf-8') as f:
                 f.write(rule_content)
+
+            # Sync to network if enabled
+            network_success, network_msg = self._sync_rule_to_network(rule_name, rule_content)
+
+            if network_success and network_msg:
+                return True, f"Successfully added rule '{rule_name}'. {network_msg}"
+            elif not network_success:
+                return True, f"Successfully added rule '{rule_name}' (Warning: {network_msg})"
 
             return True, f"Successfully added rule '{rule_name}'"
         except Exception as e:
@@ -268,7 +318,15 @@ class YaraRuleManager:
             with open(rule_path, 'w', encoding='utf-8') as f:
                 f.write(new_content)
 
+            # Sync to network if enabled
+            network_success, network_msg = self._sync_rule_to_network(rule_name, new_content)
+
             backup_msg = " (backup created)" if create_backup else ""
+            if network_success and network_msg:
+                return True, f"Rule '{rule_name}' updated successfully{backup_msg}. {network_msg}"
+            elif not network_success:
+                return True, f"Rule '{rule_name}' updated successfully{backup_msg} (Warning: {network_msg})"
+
             return True, f"Rule '{rule_name}' updated successfully{backup_msg}"
         except Exception as e:
             return False, f"Error updating rule: {str(e)}"

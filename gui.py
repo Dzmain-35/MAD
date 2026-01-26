@@ -2126,10 +2126,10 @@ class ForensicAnalysisGUI:
             files_dir = os.path.join(case_dir, "files")
             os.makedirs(files_dir, exist_ok=True)
 
-            # Create network case folder if enabled
+            # Create network case folder if enabled (use analyst name from form)
             network_case_path = ""
             if report_url and self.settings_manager.get("network.enable_network_case_folder", False):
-                network_path = self.settings_manager.get_network_case_folder_path(report_url)
+                network_path = self.settings_manager.get_network_case_folder_path(report_url, analyst_name)
                 if network_path:
                     try:
                         os.makedirs(network_path, exist_ok=True)
@@ -2238,10 +2238,10 @@ class ForensicAnalysisGUI:
             files_dir = os.path.join(case_dir, "files")
             os.makedirs(files_dir, exist_ok=True)
 
-            # Create network case folder if enabled
+            # Create network case folder if enabled (use analyst name from form)
             network_case_path = ""
             if report_url and self.settings_manager.get("network.enable_network_case_folder", False):
-                network_path = self.settings_manager.get_network_case_folder_path(report_url)
+                network_path = self.settings_manager.get_network_case_folder_path(report_url, analyst_name)
                 if network_path:
                     try:
                         os.makedirs(network_path, exist_ok=True)

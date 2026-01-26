@@ -383,32 +383,35 @@ class SettingsManager:
 
         return None
 
-    def generate_network_case_folder_name(self, report_url: str) -> Optional[str]:
+    def generate_network_case_folder_name(self, report_url: str, analyst_name: str = None) -> Optional[str]:
         """
         Generate network case folder name from analyst name and report URL
 
         Args:
             report_url: Report URL to parse
+            analyst_name: Analyst name to use (overrides settings if provided)
 
         Returns:
             Folder name like "Dylan_xpo_306892" or None if unable to generate
         """
-        analyst_name = self.get("network.analyst_name", "").strip()
-        if not analyst_name:
+        # Use provided analyst name or fall back to settings
+        name = analyst_name.strip() if analyst_name else self.get("network.analyst_name", "").strip()
+        if not name:
             return None
 
         parsed = self.parse_report_url(report_url)
         if not parsed:
             return None
 
-        return f"{analyst_name}_{parsed['platform']}_{parsed['report_id']}"
+        return f"{name}_{parsed['platform']}_{parsed['report_id']}"
 
-    def get_network_case_folder_path(self, report_url: str) -> Optional[str]:
+    def get_network_case_folder_path(self, report_url: str, analyst_name: str = None) -> Optional[str]:
         """
         Get full network path for a case folder
 
         Args:
             report_url: Report URL to parse
+            analyst_name: Analyst name to use (overrides settings if provided)
 
         Returns:
             Full network path or None if network folder is disabled or unable to generate
@@ -420,7 +423,7 @@ class SettingsManager:
         if not base_path:
             return None
 
-        folder_name = self.generate_network_case_folder_name(report_url)
+        folder_name = self.generate_network_case_folder_name(report_url, analyst_name)
         if not folder_name:
             return None
 

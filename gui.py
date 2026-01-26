@@ -55,12 +55,16 @@ class ForensicAnalysisGUI:
         self.case_manager = CaseManager(
             vt_api_key=vt_api_key if vt_api_key else None,
             threathq_user=threathq_user if threathq_user else None,
-            threathq_pass=threathq_pass if threathq_pass else None
+            threathq_pass=threathq_pass if threathq_pass else None,
+            settings_manager=self.settings_manager
         )
         print(f"Case storage initialized at: {self.case_manager.case_storage_path}")
 
         # Initialize YARA rule manager
-        self.yara_rule_manager = YaraRuleManager(self.case_manager.yara_rules_path)
+        self.yara_rule_manager = YaraRuleManager(
+            self.case_manager.yara_rules_path,
+            settings_manager=self.settings_manager
+        )
 
         # Data references
         self.current_case = None
@@ -2121,7 +2125,20 @@ class ForensicAnalysisGUI:
             case_dir = os.path.join(self.case_manager.case_storage_path, case_id)
             files_dir = os.path.join(case_dir, "files")
             os.makedirs(files_dir, exist_ok=True)
-            
+
+            # Create network case folder if enabled
+            network_case_path = ""
+            if report_url and self.settings_manager.get("network.enable_network_case_folder", False):
+                network_path = self.settings_manager.get_network_case_folder_path(report_url)
+                if network_path:
+                    try:
+                        os.makedirs(network_path, exist_ok=True)
+                        os.makedirs(os.path.join(network_path, "files"), exist_ok=True)
+                        network_case_path = network_path
+                        print(f"Created network case folder: {network_path}")
+                    except Exception as e:
+                        print(f"Warning: Could not create network folder: {e}")
+
             # Initialize case data
             case_data = {
                 "id": case_id,
@@ -2129,6 +2146,7 @@ class ForensicAnalysisGUI:
                 "status": "ACTIVE",
                 "analyst_name": analyst_name,
                 "report_url": report_url,
+                "network_case_path": network_case_path,
                 "files": [],
                 "total_threats": 0,
                 "total_vt_hits": 0
@@ -2220,6 +2238,19 @@ class ForensicAnalysisGUI:
             files_dir = os.path.join(case_dir, "files")
             os.makedirs(files_dir, exist_ok=True)
 
+            # Create network case folder if enabled
+            network_case_path = ""
+            if report_url and self.settings_manager.get("network.enable_network_case_folder", False):
+                network_path = self.settings_manager.get_network_case_folder_path(report_url)
+                if network_path:
+                    try:
+                        os.makedirs(network_path, exist_ok=True)
+                        os.makedirs(os.path.join(network_path, "files"), exist_ok=True)
+                        network_case_path = network_path
+                        print(f"Created network case folder: {network_path}")
+                    except Exception as e:
+                        print(f"Warning: Could not create network folder: {e}")
+
             # Initialize case data
             case_data = {
                 "id": case_id,
@@ -2227,6 +2258,7 @@ class ForensicAnalysisGUI:
                 "status": "ACTIVE",
                 "analyst_name": analyst_name,
                 "report_url": report_url,
+                "network_case_path": network_case_path,
                 "files": [],
                 "total_threats": 0,
                 "total_vt_hits": 0,
@@ -3762,6 +3794,15 @@ File Size: {file_info['file_size']} bytes"""
             ("advanced.debug_mode", "Debug Mode", "switch"),
             ("advanced.log_file", "Log Filename", "entry"),
             ("advanced.max_log_size_mb", "Max Log Size (MB)", "entry"),
+        ])
+
+        # Network Settings
+        self.create_settings_section(settings_scroll, "Network Sharing", [
+            ("network.analyst_name", "Analyst Name", "entry"),
+            ("network.enable_network_case_folder", "Enable Network Case Folder", "switch"),
+            ("network.network_case_folder_path", "Network Case Folder Path", "entry"),
+            ("network.enable_network_yara_sync", "Enable Network YARA Sync", "switch"),
+            ("network.network_yara_path", "Network YARA Path", "entry"),
         ])
 
         # Load current settings

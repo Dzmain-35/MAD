@@ -64,6 +64,13 @@ class SettingsManager:
             "debug_mode": False,
             "log_file": "mad.log",
             "max_log_size_mb": 50,
+        },
+        "network": {
+            "enable_network_case_folder": False,
+            "network_case_folder_path": r"\\10.1.64.2\pdc\!Persistent_Folder\MAD Cases",
+            "analyst_name": "",
+            "enable_network_yara_sync": False,
+            "network_yara_path": r"\\10.1.64.2\pdc\!Persistent_Folder\1YarWatch1\YarWatch_Scripts\YDAMN",
         }
     }
 
@@ -334,5 +341,88 @@ class SettingsManager:
             "advanced.debug_mode": "Enable debug logging",
             "advanced.log_file": "Log file name",
             "advanced.max_log_size_mb": "Maximum log file size in MB",
+            "network.enable_network_case_folder": "Enable saving cases to network folder",
+            "network.network_case_folder_path": "Network path for shared case storage",
+            "network.analyst_name": "Analyst name for network folder naming",
+            "network.enable_network_yara_sync": "Enable syncing YARA rules to network folder",
+            "network.network_yara_path": "Network path for shared YARA rules",
         }
         return descriptions.get(key_path, "No description available")
+
+    def parse_report_url(self, url: str) -> Optional[Dict[str, str]]:
+        """
+        Parse a report URL to extract platform and report ID
+
+        Supports formats like:
+        - https://xpo-mpdr.managedphishme.com/reports/306892
+        - https://exxonmobil.managedphishme.com/reports/123456
+
+        Args:
+            url: Report URL string
+
+        Returns:
+            Dictionary with 'platform' and 'report_id' keys, or None if parsing fails
+        """
+        import re
+
+        if not url:
+            return None
+
+        # Pattern to match managedphishme.com report URLs
+        # Captures: subdomain (platform identifier) and report ID
+        pattern = r'https?://([^.]+)(?:-[^.]+)?\.managedphishme\.com/reports/(\d+)'
+        match = re.match(pattern, url.strip())
+
+        if match:
+            platform = match.group(1).lower()
+            report_id = match.group(2)
+            return {
+                "platform": platform,
+                "report_id": report_id
+            }
+
+        return None
+
+    def generate_network_case_folder_name(self, report_url: str) -> Optional[str]:
+        """
+        Generate network case folder name from analyst name and report URL
+
+        Args:
+            report_url: Report URL to parse
+
+        Returns:
+            Folder name like "Dylan_xpo_306892" or None if unable to generate
+        """
+        analyst_name = self.get("network.analyst_name", "").strip()
+        if not analyst_name:
+            return None
+
+        parsed = self.parse_report_url(report_url)
+        if not parsed:
+            return None
+
+        return f"{analyst_name}_{parsed['platform']}_{parsed['report_id']}"
+
+    def get_network_case_folder_path(self, report_url: str) -> Optional[str]:
+        """
+        Get full network path for a case folder
+
+        Args:
+            report_url: Report URL to parse
+
+        Returns:
+            Full network path or None if network folder is disabled or unable to generate
+        """
+        if not self.get("network.enable_network_case_folder", False):
+            return None
+
+        base_path = self.get("network.network_case_folder_path", "")
+        if not base_path:
+            return None
+
+        folder_name = self.generate_network_case_folder_name(report_url)
+        if not folder_name:
+            return None
+
+        import os
+        return os.path.join(base_path, folder_name)

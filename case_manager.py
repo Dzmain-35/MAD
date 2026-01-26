@@ -26,7 +26,7 @@ from urllib.parse import urlparse
 
 class CaseManager:
     def __init__(self, yara_rules_path=None, case_storage_path=None, whitelist_path=None,
-                 vt_api_key=None, threathq_user=None, threathq_pass=None):
+                 vt_api_key=None, threathq_user=None, threathq_pass=None, settings_manager=None):
         """
         Initialize Case Manager
 
@@ -111,6 +111,7 @@ class CaseManager:
         self.yara_rules_path = yara_rules_path
         self.case_storage_path = case_storage_path
         self.whitelist_path = whitelist_path
+        self.settings_manager = settings_manager
 
         # API keys - use provided values or fall back to defaults
         self.vt_api_key = vt_api_key or "93aa3b4a6ba88ba96734df3e73147f89ecfd63164f3eacd240c1ff6e592d9d49"
@@ -183,17 +184,93 @@ class CaseManager:
                             self.whitelisted_hashes.add(line.lower())
             
             print(f"Loaded {len(self.whitelisted_hashes)} whitelisted hashes")
-            
+
         except Exception as e:
             print(f"Error loading whitelist: {e}")
-    
-    def create_case(self, file_paths: List[str]) -> Dict:
+
+    def _create_network_case_folder(self, report_url: str) -> Optional[str]:
+        """
+        Create a network case folder based on report URL
+
+        Args:
+            report_url: Report URL (e.g., https://xpo-mpdr.managedphishme.com/reports/306892)
+
+        Returns:
+            Path to created network folder, or None if creation failed or disabled
+        """
+        if not self.settings_manager:
+            return None
+
+        try:
+            network_path = self.settings_manager.get_network_case_folder_path(report_url)
+            if not network_path:
+                return None
+
+            # Create the network folder
+            os.makedirs(network_path, exist_ok=True)
+
+            # Create a files subdirectory in the network folder too
+            network_files_dir = os.path.join(network_path, "files")
+            os.makedirs(network_files_dir, exist_ok=True)
+
+            print(f"Created network case folder: {network_path}")
+            return network_path
+
+        except Exception as e:
+            print(f"Error creating network case folder: {e}")
+            return None
+
+    def sync_case_to_network(self, case_dir: str, network_path: str) -> bool:
+        """
+        Sync case files to network folder
+
+        Args:
+            case_dir: Local case directory
+            network_path: Network folder path
+
+        Returns:
+            True if sync successful, False otherwise
+        """
+        try:
+            if not network_path or not os.path.exists(case_dir):
+                return False
+
+            # Copy case metadata
+            local_metadata = os.path.join(case_dir, "case_metadata.json")
+            if os.path.exists(local_metadata):
+                shutil.copy2(local_metadata, os.path.join(network_path, "case_metadata.json"))
+
+            # Copy case notes if exists
+            local_notes = os.path.join(case_dir, "case_notes.txt")
+            if os.path.exists(local_notes):
+                shutil.copy2(local_notes, os.path.join(network_path, "case_notes.txt"))
+
+            # Copy files directory
+            local_files_dir = os.path.join(case_dir, "files")
+            network_files_dir = os.path.join(network_path, "files")
+
+            if os.path.exists(local_files_dir):
+                for filename in os.listdir(local_files_dir):
+                    src = os.path.join(local_files_dir, filename)
+                    dst = os.path.join(network_files_dir, filename)
+                    if os.path.isfile(src):
+                        shutil.copy2(src, dst)
+
+            print(f"Synced case to network: {network_path}")
+            return True
+
+        except Exception as e:
+            print(f"Error syncing case to network: {e}")
+            return False
+
+    def create_case(self, file_paths: List[str], report_url: str = None) -> Dict:
         """
         Create a new case with initial file uploads
-        
+
         Args:
             file_paths: List of file paths to analyze
-            
+            report_url: Optional report URL for network folder naming (e.g., https://xpo-mpdr.managedphishme.com/reports/306892)
+
         Returns:
             Case information dictionary
         """
@@ -201,15 +278,22 @@ class CaseManager:
         case_id = f"CASE-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         case_dir = os.path.join(self.case_storage_path, case_id)
         files_dir = os.path.join(case_dir, "files")
-        
+
         # Create case directories
         os.makedirs(files_dir, exist_ok=True)
-        
+
+        # Create network folder if enabled and report URL provided
+        network_case_path = None
+        if report_url and self.settings_manager:
+            network_case_path = self._create_network_case_folder(report_url)
+
         # Initialize case data
         case_data = {
             "id": case_id,
             "created": datetime.now().isoformat(),
             "status": "ACTIVE",
+            "report_url": report_url or "",
+            "network_case_path": network_case_path or "",
             "files": [],
             "total_threats": 0,
             "total_vt_hits": 0,
@@ -1039,7 +1123,7 @@ Threat Score: {file_info.get('threat_score', 0)} ({file_info.get('threat_level',
     
     def save_case_metadata(self, case_dir: str, case_data: Dict):
         """
-        Save case metadata to JSON file
+        Save case metadata to JSON file and sync to network if enabled
 
         Args:
             case_dir: Case directory path
@@ -1048,6 +1132,11 @@ Threat Score: {file_info.get('threat_score', 0)} ({file_info.get('threat_level',
         metadata_path = os.path.join(case_dir, "case_metadata.json")
         with open(metadata_path, 'w') as f:
             json.dump(case_data, f, indent=4)
+
+        # Sync to network if path is configured
+        network_path = case_data.get("network_case_path")
+        if network_path:
+            self.sync_case_to_network(case_dir, network_path)
 
     def save_case_notes(self, case_dir: str, notes: str):
         """

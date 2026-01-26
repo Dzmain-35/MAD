@@ -66,10 +66,10 @@ class SettingsManager:
             "max_log_size_mb": 50,
         },
         "network": {
-            "enable_network_case_folder": False,
+            "enable_network_case_folder": True,
             "network_case_folder_path": r"\\10.1.64.2\pdc\!Persistent_Folder\MAD Cases",
             "analyst_name": "",
-            "enable_network_yara_sync": False,
+            "enable_network_yara_sync": True,
             "network_yara_path": r"\\10.1.64.2\pdc\!Persistent_Folder\1YarWatch1\YarWatch_Scripts\YDAMN",
         }
     }

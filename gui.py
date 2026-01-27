@@ -1063,15 +1063,115 @@ class ForensicAnalysisGUI:
             justify="left"
         )
         self.network_stats_label.pack(padx=15, pady=10, anchor="w")
-        
+
+        # Filter frame
+        filter_frame = ctk.CTkFrame(frame, fg_color="gray20", corner_radius=10)
+        filter_frame.pack(fill="x", padx=20, pady=(0, 10))
+
+        filter_label = ctk.CTkLabel(filter_frame, text="Filters:", font=Fonts.label)
+        filter_label.pack(side="left", padx=(15, 10), pady=10)
+
+        # Search/filter entry
+        self.network_filter_entry = ctk.CTkEntry(
+            filter_frame, placeholder_text="Search IP, hostname, process...",
+            width=200, font=Fonts.body
+        )
+        self.network_filter_entry.pack(side="left", padx=5, pady=10)
+        self.network_filter_entry.bind("<KeyRelease>", lambda e: self.apply_network_filters())
+
+        # Status filter
+        ctk.CTkLabel(filter_frame, text="Status:", font=Fonts.body).pack(side="left", padx=(15, 5), pady=10)
+        self.network_status_filter = ctk.CTkOptionMenu(
+            filter_frame, values=["All", "ESTABLISHED", "LISTEN", "TIME_WAIT", "CLOSE_WAIT", "SYN_SENT"],
+            width=120, font=Fonts.body, command=lambda v: self.apply_network_filters()
+        )
+        self.network_status_filter.set("All")
+        self.network_status_filter.pack(side="left", padx=5, pady=10)
+
+        # Type filter
+        ctk.CTkLabel(filter_frame, text="Type:", font=Fonts.body).pack(side="left", padx=(15, 5), pady=10)
+        self.network_type_filter = ctk.CTkOptionMenu(
+            filter_frame, values=["All", "TCP", "UDP"],
+            width=80, font=Fonts.body, command=lambda v: self.apply_network_filters()
+        )
+        self.network_type_filter.set("All")
+        self.network_type_filter.pack(side="left", padx=5, pady=10)
+
+        # Suspicious only checkbox
+        self.network_suspicious_only = ctk.CTkCheckBox(
+            filter_frame, text="Suspicious Only", font=Fonts.body,
+            command=self.apply_network_filters
+        )
+        self.network_suspicious_only.pack(side="left", padx=15, pady=10)
+
+        # Clear filters button
+        btn_clear_filters = ctk.CTkButton(
+            filter_frame, text="Clear", width=60, height=28,
+            fg_color="gray40", hover_color="gray50",
+            command=self.clear_network_filters
+        )
+        btn_clear_filters.pack(side="right", padx=15, pady=10)
+
+        # Quick filter presets
+        presets_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        presets_frame.pack(fill="x", padx=20, pady=(0, 5))
+
+        ctk.CTkLabel(presets_frame, text="Quick Filters:", font=Fonts.body).pack(side="left", padx=(0, 10))
+
+        btn_web_traffic = ctk.CTkButton(
+            presets_frame, text="🌐 Web Traffic", width=100, height=28,
+            fg_color=self.colors["navy"], hover_color=self.colors["dark_blue"],
+            command=lambda: self.set_network_preset("web")
+        )
+        btn_web_traffic.pack(side="left", padx=3)
+
+        btn_dns = ctk.CTkButton(
+            presets_frame, text="🔍 DNS", width=70, height=28,
+            fg_color=self.colors["navy"], hover_color=self.colors["dark_blue"],
+            command=lambda: self.set_network_preset("dns")
+        )
+        btn_dns.pack(side="left", padx=3)
+
+        btn_suspicious = ctk.CTkButton(
+            presets_frame, text="⚠️ Suspicious", width=100, height=28,
+            fg_color=self.colors["navy"], hover_color=self.colors["dark_blue"],
+            command=lambda: self.set_network_preset("suspicious")
+        )
+        btn_suspicious.pack(side="left", padx=3)
+
+        btn_established = ctk.CTkButton(
+            presets_frame, text="✓ Active", width=80, height=28,
+            fg_color=self.colors["navy"], hover_color=self.colors["dark_blue"],
+            command=lambda: self.set_network_preset("active")
+        )
+        btn_established.pack(side="left", padx=3)
+
+        btn_all = ctk.CTkButton(
+            presets_frame, text="All", width=50, height=28,
+            fg_color="gray40", hover_color="gray50",
+            command=lambda: self.set_network_preset("all")
+        )
+        btn_all.pack(side="left", padx=3)
+
+        # Export button
+        btn_export = ctk.CTkButton(
+            presets_frame, text="📥 Export CSV", width=100, height=28,
+            fg_color=self.colors["red"], hover_color=self.colors["red_dark"],
+            command=self.export_network_connections
+        )
+        btn_export.pack(side="right", padx=5)
+
+        # Store all connections for filtering
+        self.all_network_connections = []
+
         # Connection list
         tree_frame = ctk.CTkFrame(frame, fg_color="gray20")
         tree_frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
+
         vsb = tk.Scrollbar(tree_frame, orient="vertical")
         vsb.pack(side="right", fill="y")
 
-        columns = ("Type", "Local", "Remote", "Hostname", "Status", "Process", "Suspicious")
+        columns = ("Type", "Protocol", "Local", "Remote", "Hostname", "Status", "Process", "Suspicious")
         self.network_tree = ttk.Treeview(tree_frame, columns=columns,
                                         show="headings", yscrollcommand=vsb.set)
         self.network_tree.pack(side="left", fill="both", expand=True)
@@ -1079,22 +1179,28 @@ class ForensicAnalysisGUI:
 
         # Configure columns with specific widths
         self.network_tree.heading("Type", text="Type")
-        self.network_tree.column("Type", width=80, minwidth=60)
+        self.network_tree.column("Type", width=50, minwidth=40)
+        self.network_tree.heading("Protocol", text="Protocol")
+        self.network_tree.column("Protocol", width=70, minwidth=60)
         self.network_tree.heading("Local", text="Local")
-        self.network_tree.column("Local", width=150, minwidth=100)
+        self.network_tree.column("Local", width=140, minwidth=100)
         self.network_tree.heading("Remote", text="Remote")
-        self.network_tree.column("Remote", width=150, minwidth=100)
+        self.network_tree.column("Remote", width=140, minwidth=100)
         self.network_tree.heading("Hostname", text="Hostname")
-        self.network_tree.column("Hostname", width=200, minwidth=120)
+        self.network_tree.column("Hostname", width=180, minwidth=120)
         self.network_tree.heading("Status", text="Status")
-        self.network_tree.column("Status", width=100, minwidth=80)
+        self.network_tree.column("Status", width=90, minwidth=70)
         self.network_tree.heading("Process", text="Process")
-        self.network_tree.column("Process", width=150, minwidth=100)
+        self.network_tree.column("Process", width=130, minwidth=100)
         self.network_tree.heading("Suspicious", text="Suspicious")
-        self.network_tree.column("Suspicious", width=80, minwidth=60)
+        self.network_tree.column("Suspicious", width=70, minwidth=50)
 
         # Configure tag colors
-        self.network_tree.tag_configure('suspicious', background='#5c1c1c')
+        self.network_tree.tag_configure('suspicious', background='#5c1c1c')  # Red for suspicious
+        self.network_tree.tag_configure('established', background='#1c4c1c')  # Green for established
+        self.network_tree.tag_configure('listening', background='#4c4c1c')  # Yellow for listening
+        self.network_tree.tag_configure('http', foreground='#4fc3f7')  # Light blue for HTTP
+        self.network_tree.tag_configure('https', foreground='#81c784')  # Light green for HTTPS
 
         # Right-click context menu for network tree
         self.network_context_menu = tk.Menu(
@@ -1108,20 +1214,24 @@ class ForensicAnalysisGUI:
             relief="flat"
         )
         self.network_context_menu.add_command(
-            label="📋 Copy Local Address",
+            label="📋 Copy Protocol",
             command=lambda: self.copy_network_cell(1)
         )
         self.network_context_menu.add_command(
-            label="📋 Copy Remote Address",
+            label="📋 Copy Local Address",
             command=lambda: self.copy_network_cell(2)
         )
         self.network_context_menu.add_command(
-            label="📋 Copy Hostname",
+            label="📋 Copy Remote Address",
             command=lambda: self.copy_network_cell(3)
         )
         self.network_context_menu.add_command(
+            label="📋 Copy Hostname",
+            command=lambda: self.copy_network_cell(4)
+        )
+        self.network_context_menu.add_command(
             label="📋 Copy Process Name",
-            command=lambda: self.copy_network_cell(5)
+            command=lambda: self.copy_network_cell(6)
         )
         self.network_context_menu.add_separator(background="#444444")
         self.network_context_menu.add_command(
@@ -3043,7 +3153,7 @@ File Size: {file_info['file_size']} bytes"""
             wrap="none",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=Fonts.monospace(10),
+            font=Fonts.monospace(13),
             height=12,
             relief="flat",
             padx=10,
@@ -4904,6 +5014,15 @@ Errors: {scan_stats['errors']}"""
         details_window = ctk.CTkToplevel(self.root)
         details_window.title(f"Process Analysis: {name} (PID {pid})")
         details_window.geometry("1000x700")
+
+        # Track if window is still open to prevent widget access after destruction
+        window_state = {"closed": False}
+
+        def on_window_close():
+            window_state["closed"] = True
+            details_window.destroy()
+
+        details_window.protocol("WM_DELETE_WINDOW", on_window_close)
         
         # Main container
         main_container = ctk.CTkFrame(details_window, fg_color=self.colors["dark_blue"])
@@ -5027,7 +5146,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             wrap="word",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=Fonts.monospace(11),
+            font=Fonts.monospace(13),
             relief="flat",
             padx=20,
             pady=20
@@ -5188,7 +5307,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             wrap="none",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=Fonts.monospace(10),
+            font=Fonts.monospace(13),
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set
         )
@@ -5201,7 +5320,13 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
         def search_strings(event=None):
             """Search and highlight strings with length filtering"""
-            search_term = search_entry.get().strip().lower()
+            # Check if window is still open
+            if window_state["closed"]:
+                return
+            try:
+                search_term = search_entry.get().strip().lower()
+            except Exception:
+                return  # Widget destroyed
 
             # Get length filter values
             try:
@@ -5283,24 +5408,40 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
         # Extract strings in background with progressive loading
         def extract(scan_mode="quick"):
+            # Helper to safely update UI widgets
+            def safe_update(func):
+                if not window_state["closed"]:
+                    try:
+                        self.root.after(0, func)
+                    except Exception:
+                        pass
+
             try:
+                # Check if window is still open
+                if window_state["closed"]:
+                    return
+
                 # Store current scan mode
                 all_strings_data["current_mode"] = scan_mode
 
                 # Update button states
                 if scan_mode == "quick":
-                    self.root.after(0, lambda: quick_scan_btn.configure(
+                    safe_update(lambda: quick_scan_btn.configure(
                         fg_color=self.colors["red"], text="⚡ Scanning..."))
-                    self.root.after(0, lambda: deep_scan_btn.configure(
+                    safe_update(lambda: deep_scan_btn.configure(
                         fg_color="transparent", text="🔬 Deep Scan"))
                 else:
-                    self.root.after(0, lambda: deep_scan_btn.configure(
+                    safe_update(lambda: deep_scan_btn.configure(
                         fg_color=self.colors["red"], text="🔬 Scanning..."))
-                    self.root.after(0, lambda: quick_scan_btn.configure(
+                    safe_update(lambda: quick_scan_btn.configure(
                         fg_color="transparent", text="⚡ Quick Scan"))
 
-                self.root.after(0, lambda: export_btn.configure(state="disabled"))
-                status_label.configure(text=f"Extracting strings ({scan_mode} mode)...")
+                safe_update(lambda: export_btn.configure(state="disabled"))
+                if not window_state["closed"]:
+                    try:
+                        status_label.configure(text=f"Extracting strings ({scan_mode} mode)...")
+                    except Exception:
+                        pass
 
                 # Get minimum length for extraction
                 try:
@@ -5315,6 +5456,9 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 # Progressive callback for UI updates
                 def progress_callback(current_strings, regions_total, regions_read, final=False):
                     """Update UI with progressive results"""
+                    # Skip if window is closed
+                    if window_state["closed"]:
+                        return
                     try:
                         # Flatten strings for display
                         flat_strings = []
@@ -5327,12 +5471,12 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                         if final:
                             status_msg = f"Complete: {len(flat_strings)} strings ({scan_mode} mode)"
 
-                        self.root.after(0, lambda msg=status_msg: status_label.configure(text=msg))
+                        safe_update(lambda msg=status_msg: status_label.configure(text=msg))
 
                         # Update display every 10 regions or on final
                         if final or regions_read % 10 == 0:
                             all_strings_data["strings"] = flat_strings
-                            self.root.after(0, search_strings)
+                            safe_update(search_strings)
                     except Exception as e:
                         print(f"Progress callback error: {e}")
 
@@ -5340,7 +5484,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 extraction_result = self.process_monitor.extract_strings_from_process(
                     pid,
                     min_length=extract_min_length,
-                    limit=20000,
+                    limit=100000,  # Increased limit to capture all strings
                     enable_quality_filter=use_quality_filter,
                     scan_mode=scan_mode,
                     progress_callback=progress_callback,
@@ -5360,62 +5504,72 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
                 if urls:
                     result_text += f"URLs/Domains ({len(urls)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(urls[:50]) + "\n\n"
+                    result_text += "\n".join(urls) + "\n\n"
                 if ips:
                     result_text += f"IP Addresses ({len(ips)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(ips[:50]) + "\n\n"
+                    result_text += "\n".join(ips) + "\n\n"
                 if paths:
                     result_text += f"File Paths ({len(paths)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(paths[:50]) + "\n\n"
+                    result_text += "\n".join(paths) + "\n\n"
                 if others:
                     result_text += f"Other Strings ({len(others)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(others[:200]) + "\n"
+                    result_text += "\n".join(others) + "\n"
 
                 # Store strings and full extraction result for export
                 all_strings_data["strings"] = strings
                 all_strings_data["original_text"] = result_text
                 all_strings_data["extraction_result"] = extraction_result  # Store full result with metadata
 
-                # Update UI in main thread
+                # Update UI in main thread (only if window still open)
+                if window_state["closed"]:
+                    # Still save to case folders even if window closed
+                    self.save_strings_to_case_folders(strings, name, pid, scan_mode)
+                    return
+
                 filter_status = "Quality Filtered" if use_quality_filter else "All Strings (Unfiltered)"
-                self.root.after(0, lambda: strings_text.configure(state="normal"))
-                self.root.after(0, lambda: strings_text.delete("1.0", "end"))
-                self.root.after(0, lambda: strings_text.insert("1.0", result_text))
-                self.root.after(0, lambda: strings_text.configure(state="disabled"))
-                self.root.after(0, lambda: status_label.configure(
+                safe_update(lambda: strings_text.configure(state="normal"))
+                safe_update(lambda: strings_text.delete("1.0", "end"))
+                safe_update(lambda: strings_text.insert("1.0", result_text))
+                safe_update(lambda: strings_text.configure(state="disabled"))
+                safe_update(lambda: status_label.configure(
                     text=f"Complete: {len(strings)} strings ({scan_mode} mode, {filter_status})"
                 ))
 
                 # Restore button states
                 if scan_mode == "quick":
-                    self.root.after(0, lambda: quick_scan_btn.configure(
+                    safe_update(lambda: quick_scan_btn.configure(
                         fg_color=self.colors["red"], text="⚡ Quick Scan"))
                 else:
-                    self.root.after(0, lambda: deep_scan_btn.configure(
+                    safe_update(lambda: deep_scan_btn.configure(
                         fg_color=self.colors["red"], text="🔬 Deep Scan"))
 
-                self.root.after(0, lambda: export_btn.configure(state="normal"))
+                safe_update(lambda: export_btn.configure(state="normal"))
 
                 # Auto-apply current filters after extraction
-                self.root.after(100, search_strings)
+                if not window_state["closed"]:
+                    self.root.after(100, search_strings)
+
+                # Auto-save strings to case folders
+                self.save_strings_to_case_folders(strings, name, pid, scan_mode)
 
             except Exception as e:
                 import traceback
                 traceback.print_exc()
 
-                self.root.after(0, lambda: strings_text.configure(state="normal"))
-                self.root.after(0, lambda: strings_text.delete("1.0", "end"))
-                self.root.after(0, lambda: strings_text.insert("1.0", f"Error: {str(e)}"))
-                self.root.after(0, lambda: strings_text.configure(state="disabled"))
-                self.root.after(0, lambda: status_label.configure(text="Error extracting strings"))
+                if not window_state["closed"]:
+                    safe_update(lambda: strings_text.configure(state="normal"))
+                    safe_update(lambda: strings_text.delete("1.0", "end"))
+                    safe_update(lambda: strings_text.insert("1.0", f"Error: {str(e)}"))
+                    safe_update(lambda: strings_text.configure(state="disabled"))
+                    safe_update(lambda: status_label.configure(text="Error extracting strings"))
 
-                # Restore button states
-                if scan_mode == "quick":
-                    self.root.after(0, lambda: quick_scan_btn.configure(text="⚡ Quick Scan"))
-                else:
-                    self.root.after(0, lambda: deep_scan_btn.configure(text="🔬 Deep Scan"))
+                    # Restore button states
+                    if scan_mode == "quick":
+                        safe_update(lambda: quick_scan_btn.configure(text="⚡ Quick Scan"))
+                    else:
+                        safe_update(lambda: deep_scan_btn.configure(text="🔬 Deep Scan"))
 
-                self.root.after(0, lambda: export_btn.configure(state="normal"))
+                    safe_update(lambda: export_btn.configure(state="normal"))
 
         def export_strings():
             """Export extracted strings to TXT file"""
@@ -5968,7 +6122,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             wrap="none",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=Fonts.monospace(10),
+            font=Fonts.monospace(13),
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set
         )
@@ -6448,11 +6602,11 @@ Risk Level: {risk_level}"""
 
         try:
             item = self.network_tree.item(selection[0])
-            values = item['values']  # [Type, Local, Remote, Hostname, Status, Process, Suspicious]
+            values = item['values']  # [Type, Protocol, Local, Remote, Hostname, Status, Process, Suspicious]
 
-            if field_type == "remote_ip" and len(values) > 2:
-                # Extract IP from "IP:Port" format in Remote column (index 2)
-                remote_addr = str(values[2])
+            if field_type == "remote_ip" and len(values) > 3:
+                # Extract IP from "IP:Port" format in Remote column (index 3)
+                remote_addr = str(values[3])
                 remote_ip = remote_addr.split(':')[0] if ':' in remote_addr else remote_addr
 
                 # Validate it's not empty or just a dash
@@ -6463,8 +6617,8 @@ Risk Level: {risk_level}"""
                 else:
                     messagebox.showwarning("Invalid IP", "No valid IP address found in the selected connection.")
 
-            elif field_type == "hostname" and len(values) > 3:
-                hostname = str(values[3])
+            elif field_type == "hostname" and len(values) > 4:
+                hostname = str(values[4])
                 # Validate hostname is not empty or dash
                 if hostname and hostname != '-':
                     self.case_manager.add_ioc("domains", hostname)
@@ -6547,15 +6701,41 @@ Risk Level: {risk_level}"""
             self.hostname_cache[ip_address] = '-'
             return '-'
 
+    def get_port_protocol(self, port):
+        """Get protocol name based on port number"""
+        port_protocols = {
+            80: "HTTP",
+            443: "HTTPS",
+            8080: "HTTP-Alt",
+            8443: "HTTPS-Alt",
+            53: "DNS",
+            21: "FTP",
+            22: "SSH",
+            23: "Telnet",
+            25: "SMTP",
+            110: "POP3",
+            143: "IMAP",
+            3389: "RDP",
+            445: "SMB",
+            139: "NetBIOS",
+            1433: "MSSQL",
+            3306: "MySQL",
+            5432: "PostgreSQL",
+            6379: "Redis",
+            27017: "MongoDB",
+            4444: "Metasploit",
+            5555: "ADB",
+            8888: "Proxy",
+        }
+        return port_protocols.get(port, "-")
+
     def refresh_network_list(self):
         """Refresh network connections list"""
-        # Clear existing
-        for item in self.network_tree.get_children():
-            self.network_tree.delete(item)
-
         # Get connections
         connections = self.network_monitor.get_all_connections()
 
+        # Store all connections with resolved hostnames for filtering
+        self.all_network_connections = []
         for conn in connections:
             local_addr = f"{conn.get('local_ip', '')}:{conn.get('local_port', '')}"
             remote_addr = f"{conn.get('remote_ip', '')}:{conn.get('remote_port', '')}"
@@ -6564,23 +6744,27 @@ Risk Level: {risk_level}"""
             remote_ip = conn.get('remote_ip', '')
             hostname = self.resolve_hostname(remote_ip) if remote_ip else '-'
 
-            suspicious_text = "Yes" if conn.get('suspicious', False) else "No"
-            tags = ('suspicious',) if conn.get('suspicious', False) else ()
+            # Detect protocol based on port
+            remote_port = conn.get('remote_port', 0)
+            local_port = conn.get('local_port', 0)
+            protocol = self.get_port_protocol(remote_port) or self.get_port_protocol(local_port) or "-"
 
-            self.network_tree.insert(
-                "", "end",
-                values=(
-                    conn.get('type', ''),
-                    local_addr,
-                    remote_addr,
-                    hostname,
-                    conn.get('status', ''),
-                    conn.get('process_name', 'Unknown'),
-                    suspicious_text
-                ),
-                tags=tags
-            )
-        
+            self.all_network_connections.append({
+                'type': conn.get('type', ''),
+                'protocol': protocol,
+                'local': local_addr,
+                'remote': remote_addr,
+                'hostname': hostname,
+                'status': conn.get('status', ''),
+                'process': conn.get('process_name', 'Unknown'),
+                'suspicious': conn.get('suspicious', False),
+                'remote_port': remote_port,
+                'local_port': local_port
+            })
+
+        # Apply filters and display
+        self.apply_network_filters()
+
         # Update stats
         if self.network_monitor_active:
             summary = self.network_monitor.get_connection_summary()
@@ -6588,6 +6772,202 @@ Risk Level: {risk_level}"""
 Active: {summary['active_connections']} | Total: {summary['total_connections']} | Suspicious: {summary['suspicious_connections']}
 Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_local_ports']}"""
             self.network_stats_label.configure(text=stats_text)
+
+    def apply_network_filters(self):
+        """Apply filters to network connections list"""
+        # Clear existing
+        for item in self.network_tree.get_children():
+            self.network_tree.delete(item)
+
+        # Get filter values
+        search_term = self.network_filter_entry.get().strip().lower()
+        status_filter = self.network_status_filter.get()
+        type_filter = self.network_type_filter.get()
+        suspicious_only = self.network_suspicious_only.get()
+
+        # Check for protocol filter in search (e.g., "protocol:http")
+        protocol_filter = None
+        if search_term.startswith("protocol:"):
+            protocol_filter = search_term.replace("protocol:", "").strip().upper()
+            search_term = ""
+
+        filtered_count = 0
+        for conn in self.all_network_connections:
+            # Apply status filter
+            if status_filter != "All" and conn['status'] != status_filter:
+                continue
+
+            # Apply type filter
+            if type_filter != "All" and conn['type'] != type_filter:
+                continue
+
+            # Apply suspicious only filter
+            if suspicious_only and not conn['suspicious']:
+                continue
+
+            # Apply protocol filter
+            if protocol_filter:
+                if protocol_filter not in conn.get('protocol', '-').upper():
+                    continue
+
+            # Apply search filter
+            if search_term:
+                searchable = f"{conn['local']} {conn['remote']} {conn['hostname']} {conn['process']} {conn.get('protocol', '')}".lower()
+                if search_term not in searchable:
+                    continue
+
+            # Determine tags for coloring
+            tags = []
+            if conn['suspicious']:
+                tags.append('suspicious')
+            elif conn['status'] == 'ESTABLISHED':
+                tags.append('established')
+            elif conn['status'] == 'LISTEN':
+                tags.append('listening')
+
+            # Add protocol-based tags
+            protocol = conn.get('protocol', '-')
+            if protocol in ('HTTP', 'HTTP-Alt'):
+                tags.append('http')
+            elif protocol in ('HTTPS', 'HTTPS-Alt'):
+                tags.append('https')
+
+            suspicious_text = "Yes" if conn['suspicious'] else "No"
+
+            self.network_tree.insert(
+                "", "end",
+                values=(
+                    conn['type'],
+                    conn.get('protocol', '-'),
+                    conn['local'],
+                    conn['remote'],
+                    conn['hostname'],
+                    conn['status'],
+                    conn['process'],
+                    suspicious_text
+                ),
+                tags=tuple(tags)
+            )
+            filtered_count += 1
+
+        # Update filter status in stats if monitoring
+        if hasattr(self, 'all_network_connections'):
+            total = len(self.all_network_connections)
+            if filtered_count != total:
+                current_text = self.network_stats_label.cget("text")
+                if "| Showing:" not in current_text:
+                    self.network_stats_label.configure(
+                        text=f"{current_text}\n| Showing: {filtered_count}/{total} connections"
+                    )
+
+    def clear_network_filters(self):
+        """Clear all network filters"""
+        self.network_filter_entry.delete(0, "end")
+        self.network_status_filter.set("All")
+        self.network_type_filter.set("All")
+        self.network_suspicious_only.deselect()
+        self.apply_network_filters()
+
+    def set_network_preset(self, preset):
+        """Set network filter preset"""
+        # Clear first
+        self.network_filter_entry.delete(0, "end")
+        self.network_status_filter.set("All")
+        self.network_type_filter.set("All")
+        self.network_suspicious_only.deselect()
+
+        if preset == "web":
+            # Filter for HTTP/HTTPS traffic
+            self.network_filter_entry.insert(0, "protocol:http")
+        elif preset == "dns":
+            # Filter for DNS traffic
+            self.network_filter_entry.insert(0, "protocol:dns")
+        elif preset == "suspicious":
+            # Show only suspicious
+            self.network_suspicious_only.select()
+        elif preset == "active":
+            # Show only established connections
+            self.network_status_filter.set("ESTABLISHED")
+        # "all" just uses cleared filters
+
+        self.apply_network_filters()
+
+    def export_network_connections(self):
+        """Export network connections to CSV file"""
+        if not self.all_network_connections:
+            messagebox.showwarning("No Data", "No network connections to export. Start monitoring first.")
+            return
+
+        from tkinter import filedialog
+        from datetime import datetime
+
+        # Generate default filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"network_connections_{timestamp}.csv"
+
+        file_path = filedialog.asksaveasfilename(
+            title="Export Network Connections",
+            defaultextension=".csv",
+            initialfile=default_name,
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+
+        if not file_path:
+            return
+
+        try:
+            import csv
+            with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                # Header
+                writer.writerow([
+                    "Type", "Protocol", "Local Address", "Remote Address",
+                    "Hostname", "Status", "Process", "Suspicious",
+                    "Local Port", "Remote Port"
+                ])
+                # Data
+                for conn in self.all_network_connections:
+                    writer.writerow([
+                        conn.get('type', ''),
+                        conn.get('protocol', '-'),
+                        conn.get('local', ''),
+                        conn.get('remote', ''),
+                        conn.get('hostname', ''),
+                        conn.get('status', ''),
+                        conn.get('process', ''),
+                        "Yes" if conn.get('suspicious', False) else "No",
+                        conn.get('local_port', ''),
+                        conn.get('remote_port', '')
+                    ])
+
+            messagebox.showinfo("Export Complete", f"Exported {len(self.all_network_connections)} connections to:\n{file_path}")
+
+            # Also save to case folder if active
+            if self.current_case:
+                case_id = self.current_case.get('id')
+                case_dir = os.path.join(self.case_manager.case_storage_path, case_id)
+                network_dir = os.path.join(case_dir, "network")
+                os.makedirs(network_dir, exist_ok=True)
+
+                case_export_path = os.path.join(network_dir, default_name)
+                import shutil
+                shutil.copy2(file_path, case_export_path)
+                print(f"Network connections also saved to case folder: {case_export_path}")
+
+                # Save to network folder if configured
+                network_case_path = self.current_case.get('network_case_path', '')
+                if network_case_path:
+                    try:
+                        network_export_dir = os.path.join(network_case_path, "network")
+                        os.makedirs(network_export_dir, exist_ok=True)
+                        network_export_path = os.path.join(network_export_dir, default_name)
+                        shutil.copy2(file_path, network_export_path)
+                        print(f"Network connections also saved to network folder: {network_export_path}")
+                    except Exception as e:
+                        print(f"Warning: Could not save to network folder: {e}")
+
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export: {str(e)}")
 
     # ==================== FILE VIEWER AND EXECUTOR ====================
     def view_file_hex(self, file_path, file_name):
@@ -6636,7 +7016,7 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
             wrap="none",
             bg="#0d1520",
             fg="#ffffff",
-            font=("Courier New", 10),
+            font=("Courier New", 13),
             selectbackground="#2a4d6e",
             selectforeground="#ffffff"
         )
@@ -6714,7 +7094,7 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
             wrap="none",
             bg="#1a2332",
             fg="gray60",
-            font=("Courier New", 10),
+            font=("Courier New", 13),
             state="disabled",
             takefocus=0
         )
@@ -6725,7 +7105,7 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
             wrap="none",
             bg="#0d1520",
             fg="#ffffff",
-            font=("Courier New", 10),
+            font=("Courier New", 13),
             selectbackground="#2a4d6e",
             selectforeground="#ffffff"
         )
@@ -6810,6 +7190,132 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
         # Focus on the executed process (with slight delay to allow tree to refresh)
         if pid:
             self.root.after(500, lambda: self.focus_process_by_pid(pid))
+
+            # Auto-extract memory strings after process has time to initialize
+            if self.current_case:
+                self.root.after(3000, lambda: self._auto_extract_memory_strings(pid, file_name))
+
+
+    def _auto_extract_memory_strings(self, pid, file_name):
+        """
+        Auto-extract memory strings from an executed process and save to case folders
+
+        Args:
+            pid: Process ID to extract strings from
+            file_name: Name of the executed file
+        """
+        def extract_thread():
+            try:
+                import psutil
+                # Verify process is still running
+                if not psutil.pid_exists(pid):
+                    print(f"Process {pid} no longer exists - skipping auto string extraction")
+                    return
+
+                print(f"Auto-extracting memory strings from PID {pid} ({file_name})...")
+
+                # Extract strings using process monitor
+                extraction_result = self.process_monitor.extract_strings_from_process(
+                    pid,
+                    min_length=4,
+                    limit=100000,
+                    enable_quality_filter=True,
+                    scan_mode="quick",
+                    return_full_result=True
+                )
+
+                strings = extraction_result.get('strings', [])
+                if strings:
+                    # Save to case folders
+                    process_name = file_name.replace('.', '_')
+                    self.save_strings_to_case_folders(strings, process_name, pid, "auto_executed")
+                    print(f"Auto-extracted {len(strings)} strings from {file_name} (PID: {pid})")
+                else:
+                    print(f"No strings extracted from {file_name} (PID: {pid})")
+
+            except Exception as e:
+                print(f"Error in auto string extraction: {e}")
+
+        # Run extraction in background thread
+        threading.Thread(target=extract_thread, daemon=True).start()
+
+    def save_strings_to_case_folders(self, strings_data, process_name, pid, scan_mode="extracted"):
+        """
+        Save extracted strings to both local and network case folders
+
+        Args:
+            strings_data: List of extracted strings or dict with extraction result
+            process_name: Name of the process
+            pid: Process ID
+            scan_mode: Type of scan (quick, deep, extracted)
+        """
+        if not self.current_case:
+            print("No active case - strings not saved to case folder")
+            return
+
+        try:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{process_name}_{pid}_strings_{scan_mode}_{timestamp}.txt"
+
+            # Prepare content
+            if isinstance(strings_data, dict) and 'strings' in strings_data:
+                strings = strings_data.get('strings', [])
+            else:
+                strings = strings_data if isinstance(strings_data, list) else []
+
+            # Format content
+            content = f"Memory Strings Extraction Report\n"
+            content += f"{'='*80}\n"
+            content += f"Process: {process_name}\n"
+            content += f"PID: {pid}\n"
+            content += f"Scan Mode: {scan_mode}\n"
+            content += f"Timestamp: {datetime.now().isoformat()}\n"
+            content += f"Total Strings: {len(strings)}\n"
+            content += f"{'='*80}\n\n"
+
+            # Group strings by type for better organization
+            urls = [s for s in strings if ('http://' in s or 'https://' in s or 'www.' in s)]
+            paths = [s for s in strings if ('\\' in s or '/' in s) and len(s) > 10]
+            others = [s for s in strings if s not in urls and s not in paths]
+
+            if urls:
+                content += f"URLs/Domains ({len(urls)}):\n" + "-"*40 + "\n"
+                content += "\n".join(urls) + "\n\n"
+            if paths:
+                content += f"File Paths ({len(paths)}):\n" + "-"*40 + "\n"
+                content += "\n".join(paths) + "\n\n"
+            if others:
+                content += f"Other Strings ({len(others)}):\n" + "-"*40 + "\n"
+                content += "\n".join(others) + "\n"
+
+            # Save to local case folder
+            case_id = self.current_case.get('id')
+            local_case_dir = os.path.join(self.case_manager.case_storage_path, case_id)
+            strings_dir = os.path.join(local_case_dir, "strings")
+            os.makedirs(strings_dir, exist_ok=True)
+
+            local_path = os.path.join(strings_dir, filename)
+            with open(local_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(f"Strings saved to local case folder: {local_path}")
+
+            # Save to network case folder if configured
+            network_case_path = self.current_case.get('network_case_path', '')
+            if network_case_path:
+                try:
+                    network_strings_dir = os.path.join(network_case_path, "strings")
+                    os.makedirs(network_strings_dir, exist_ok=True)
+
+                    network_path = os.path.join(network_strings_dir, filename)
+                    with open(network_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    print(f"Strings saved to network case folder: {network_path}")
+                except Exception as e:
+                    print(f"Warning: Could not save strings to network folder: {e}")
+
+        except Exception as e:
+            print(f"Error saving strings to case folders: {e}")
 
 
 # Main entry point

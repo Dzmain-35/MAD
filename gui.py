@@ -1112,17 +1112,66 @@ class ForensicAnalysisGUI:
         )
         btn_clear_filters.pack(side="right", padx=15, pady=10)
 
+        # Quick filter presets
+        presets_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        presets_frame.pack(fill="x", padx=20, pady=(0, 5))
+
+        ctk.CTkLabel(presets_frame, text="Quick Filters:", font=Fonts.body).pack(side="left", padx=(0, 10))
+
+        btn_web_traffic = ctk.CTkButton(
+            presets_frame, text="🌐 Web Traffic", width=100, height=28,
+            fg_color=self.colors["navy"], hover_color=self.colors["dark_blue"],
+            command=lambda: self.set_network_preset("web")
+        )
+        btn_web_traffic.pack(side="left", padx=3)
+
+        btn_dns = ctk.CTkButton(
+            presets_frame, text="🔍 DNS", width=70, height=28,
+            fg_color=self.colors["navy"], hover_color=self.colors["dark_blue"],
+            command=lambda: self.set_network_preset("dns")
+        )
+        btn_dns.pack(side="left", padx=3)
+
+        btn_suspicious = ctk.CTkButton(
+            presets_frame, text="⚠️ Suspicious", width=100, height=28,
+            fg_color=self.colors["navy"], hover_color=self.colors["dark_blue"],
+            command=lambda: self.set_network_preset("suspicious")
+        )
+        btn_suspicious.pack(side="left", padx=3)
+
+        btn_established = ctk.CTkButton(
+            presets_frame, text="✓ Active", width=80, height=28,
+            fg_color=self.colors["navy"], hover_color=self.colors["dark_blue"],
+            command=lambda: self.set_network_preset("active")
+        )
+        btn_established.pack(side="left", padx=3)
+
+        btn_all = ctk.CTkButton(
+            presets_frame, text="All", width=50, height=28,
+            fg_color="gray40", hover_color="gray50",
+            command=lambda: self.set_network_preset("all")
+        )
+        btn_all.pack(side="left", padx=3)
+
+        # Export button
+        btn_export = ctk.CTkButton(
+            presets_frame, text="📥 Export CSV", width=100, height=28,
+            fg_color=self.colors["red"], hover_color=self.colors["red_dark"],
+            command=self.export_network_connections
+        )
+        btn_export.pack(side="right", padx=5)
+
         # Store all connections for filtering
         self.all_network_connections = []
 
         # Connection list
         tree_frame = ctk.CTkFrame(frame, fg_color="gray20")
         tree_frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
+
         vsb = tk.Scrollbar(tree_frame, orient="vertical")
         vsb.pack(side="right", fill="y")
 
-        columns = ("Type", "Local", "Remote", "Hostname", "Status", "Process", "Suspicious")
+        columns = ("Type", "Protocol", "Local", "Remote", "Hostname", "Status", "Process", "Suspicious")
         self.network_tree = ttk.Treeview(tree_frame, columns=columns,
                                         show="headings", yscrollcommand=vsb.set)
         self.network_tree.pack(side="left", fill="both", expand=True)
@@ -1130,24 +1179,28 @@ class ForensicAnalysisGUI:
 
         # Configure columns with specific widths
         self.network_tree.heading("Type", text="Type")
-        self.network_tree.column("Type", width=80, minwidth=60)
+        self.network_tree.column("Type", width=50, minwidth=40)
+        self.network_tree.heading("Protocol", text="Protocol")
+        self.network_tree.column("Protocol", width=70, minwidth=60)
         self.network_tree.heading("Local", text="Local")
-        self.network_tree.column("Local", width=150, minwidth=100)
+        self.network_tree.column("Local", width=140, minwidth=100)
         self.network_tree.heading("Remote", text="Remote")
-        self.network_tree.column("Remote", width=150, minwidth=100)
+        self.network_tree.column("Remote", width=140, minwidth=100)
         self.network_tree.heading("Hostname", text="Hostname")
-        self.network_tree.column("Hostname", width=200, minwidth=120)
+        self.network_tree.column("Hostname", width=180, minwidth=120)
         self.network_tree.heading("Status", text="Status")
-        self.network_tree.column("Status", width=100, minwidth=80)
+        self.network_tree.column("Status", width=90, minwidth=70)
         self.network_tree.heading("Process", text="Process")
-        self.network_tree.column("Process", width=150, minwidth=100)
+        self.network_tree.column("Process", width=130, minwidth=100)
         self.network_tree.heading("Suspicious", text="Suspicious")
-        self.network_tree.column("Suspicious", width=80, minwidth=60)
+        self.network_tree.column("Suspicious", width=70, minwidth=50)
 
         # Configure tag colors
         self.network_tree.tag_configure('suspicious', background='#5c1c1c')  # Red for suspicious
         self.network_tree.tag_configure('established', background='#1c4c1c')  # Green for established
         self.network_tree.tag_configure('listening', background='#4c4c1c')  # Yellow for listening
+        self.network_tree.tag_configure('http', foreground='#4fc3f7')  # Light blue for HTTP
+        self.network_tree.tag_configure('https', foreground='#81c784')  # Light green for HTTPS
 
         # Right-click context menu for network tree
         self.network_context_menu = tk.Menu(
@@ -1161,20 +1214,24 @@ class ForensicAnalysisGUI:
             relief="flat"
         )
         self.network_context_menu.add_command(
-            label="📋 Copy Local Address",
+            label="📋 Copy Protocol",
             command=lambda: self.copy_network_cell(1)
         )
         self.network_context_menu.add_command(
-            label="📋 Copy Remote Address",
+            label="📋 Copy Local Address",
             command=lambda: self.copy_network_cell(2)
         )
         self.network_context_menu.add_command(
-            label="📋 Copy Hostname",
+            label="📋 Copy Remote Address",
             command=lambda: self.copy_network_cell(3)
         )
         self.network_context_menu.add_command(
+            label="📋 Copy Hostname",
+            command=lambda: self.copy_network_cell(4)
+        )
+        self.network_context_menu.add_command(
             label="📋 Copy Process Name",
-            command=lambda: self.copy_network_cell(5)
+            command=lambda: self.copy_network_cell(6)
         )
         self.network_context_menu.add_separator(background="#444444")
         self.network_context_menu.add_command(
@@ -6545,11 +6602,11 @@ Risk Level: {risk_level}"""
 
         try:
             item = self.network_tree.item(selection[0])
-            values = item['values']  # [Type, Local, Remote, Hostname, Status, Process, Suspicious]
+            values = item['values']  # [Type, Protocol, Local, Remote, Hostname, Status, Process, Suspicious]
 
-            if field_type == "remote_ip" and len(values) > 2:
-                # Extract IP from "IP:Port" format in Remote column (index 2)
-                remote_addr = str(values[2])
+            if field_type == "remote_ip" and len(values) > 3:
+                # Extract IP from "IP:Port" format in Remote column (index 3)
+                remote_addr = str(values[3])
                 remote_ip = remote_addr.split(':')[0] if ':' in remote_addr else remote_addr
 
                 # Validate it's not empty or just a dash
@@ -6560,8 +6617,8 @@ Risk Level: {risk_level}"""
                 else:
                     messagebox.showwarning("Invalid IP", "No valid IP address found in the selected connection.")
 
-            elif field_type == "hostname" and len(values) > 3:
-                hostname = str(values[3])
+            elif field_type == "hostname" and len(values) > 4:
+                hostname = str(values[4])
                 # Validate hostname is not empty or dash
                 if hostname and hostname != '-':
                     self.case_manager.add_ioc("domains", hostname)
@@ -6644,6 +6701,34 @@ Risk Level: {risk_level}"""
             self.hostname_cache[ip_address] = '-'
             return '-'
 
+    def get_port_protocol(self, port):
+        """Get protocol name based on port number"""
+        port_protocols = {
+            80: "HTTP",
+            443: "HTTPS",
+            8080: "HTTP-Alt",
+            8443: "HTTPS-Alt",
+            53: "DNS",
+            21: "FTP",
+            22: "SSH",
+            23: "Telnet",
+            25: "SMTP",
+            110: "POP3",
+            143: "IMAP",
+            3389: "RDP",
+            445: "SMB",
+            139: "NetBIOS",
+            1433: "MSSQL",
+            3306: "MySQL",
+            5432: "PostgreSQL",
+            6379: "Redis",
+            27017: "MongoDB",
+            4444: "Metasploit",
+            5555: "ADB",
+            8888: "Proxy",
+        }
+        return port_protocols.get(port, "-")
+
     def refresh_network_list(self):
         """Refresh network connections list"""
         # Get connections
@@ -6659,15 +6744,22 @@ Risk Level: {risk_level}"""
             remote_ip = conn.get('remote_ip', '')
             hostname = self.resolve_hostname(remote_ip) if remote_ip else '-'
 
+            # Detect protocol based on port
+            remote_port = conn.get('remote_port', 0)
+            local_port = conn.get('local_port', 0)
+            protocol = self.get_port_protocol(remote_port) or self.get_port_protocol(local_port) or "-"
+
             self.all_network_connections.append({
                 'type': conn.get('type', ''),
+                'protocol': protocol,
                 'local': local_addr,
                 'remote': remote_addr,
                 'hostname': hostname,
                 'status': conn.get('status', ''),
                 'process': conn.get('process_name', 'Unknown'),
                 'suspicious': conn.get('suspicious', False),
-                'remote_port': conn.get('remote_port', 0)
+                'remote_port': remote_port,
+                'local_port': local_port
             })
 
         # Apply filters and display
@@ -6693,6 +6785,12 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
         type_filter = self.network_type_filter.get()
         suspicious_only = self.network_suspicious_only.get()
 
+        # Check for protocol filter in search (e.g., "protocol:http")
+        protocol_filter = None
+        if search_term.startswith("protocol:"):
+            protocol_filter = search_term.replace("protocol:", "").strip().upper()
+            search_term = ""
+
         filtered_count = 0
         for conn in self.all_network_connections:
             # Apply status filter
@@ -6707,9 +6805,14 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
             if suspicious_only and not conn['suspicious']:
                 continue
 
+            # Apply protocol filter
+            if protocol_filter:
+                if protocol_filter not in conn.get('protocol', '-').upper():
+                    continue
+
             # Apply search filter
             if search_term:
-                searchable = f"{conn['local']} {conn['remote']} {conn['hostname']} {conn['process']}".lower()
+                searchable = f"{conn['local']} {conn['remote']} {conn['hostname']} {conn['process']} {conn.get('protocol', '')}".lower()
                 if search_term not in searchable:
                     continue
 
@@ -6722,12 +6825,20 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
             elif conn['status'] == 'LISTEN':
                 tags.append('listening')
 
+            # Add protocol-based tags
+            protocol = conn.get('protocol', '-')
+            if protocol in ('HTTP', 'HTTP-Alt'):
+                tags.append('http')
+            elif protocol in ('HTTPS', 'HTTPS-Alt'):
+                tags.append('https')
+
             suspicious_text = "Yes" if conn['suspicious'] else "No"
 
             self.network_tree.insert(
                 "", "end",
                 values=(
                     conn['type'],
+                    conn.get('protocol', '-'),
                     conn['local'],
                     conn['remote'],
                     conn['hostname'],
@@ -6756,6 +6867,107 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
         self.network_type_filter.set("All")
         self.network_suspicious_only.deselect()
         self.apply_network_filters()
+
+    def set_network_preset(self, preset):
+        """Set network filter preset"""
+        # Clear first
+        self.network_filter_entry.delete(0, "end")
+        self.network_status_filter.set("All")
+        self.network_type_filter.set("All")
+        self.network_suspicious_only.deselect()
+
+        if preset == "web":
+            # Filter for HTTP/HTTPS traffic
+            self.network_filter_entry.insert(0, "protocol:http")
+        elif preset == "dns":
+            # Filter for DNS traffic
+            self.network_filter_entry.insert(0, "protocol:dns")
+        elif preset == "suspicious":
+            # Show only suspicious
+            self.network_suspicious_only.select()
+        elif preset == "active":
+            # Show only established connections
+            self.network_status_filter.set("ESTABLISHED")
+        # "all" just uses cleared filters
+
+        self.apply_network_filters()
+
+    def export_network_connections(self):
+        """Export network connections to CSV file"""
+        if not self.all_network_connections:
+            messagebox.showwarning("No Data", "No network connections to export. Start monitoring first.")
+            return
+
+        from tkinter import filedialog
+        from datetime import datetime
+
+        # Generate default filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"network_connections_{timestamp}.csv"
+
+        file_path = filedialog.asksaveasfilename(
+            title="Export Network Connections",
+            defaultextension=".csv",
+            initialfile=default_name,
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+
+        if not file_path:
+            return
+
+        try:
+            import csv
+            with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                # Header
+                writer.writerow([
+                    "Type", "Protocol", "Local Address", "Remote Address",
+                    "Hostname", "Status", "Process", "Suspicious",
+                    "Local Port", "Remote Port"
+                ])
+                # Data
+                for conn in self.all_network_connections:
+                    writer.writerow([
+                        conn.get('type', ''),
+                        conn.get('protocol', '-'),
+                        conn.get('local', ''),
+                        conn.get('remote', ''),
+                        conn.get('hostname', ''),
+                        conn.get('status', ''),
+                        conn.get('process', ''),
+                        "Yes" if conn.get('suspicious', False) else "No",
+                        conn.get('local_port', ''),
+                        conn.get('remote_port', '')
+                    ])
+
+            messagebox.showinfo("Export Complete", f"Exported {len(self.all_network_connections)} connections to:\n{file_path}")
+
+            # Also save to case folder if active
+            if self.current_case:
+                case_id = self.current_case.get('id')
+                case_dir = os.path.join(self.case_manager.case_storage_path, case_id)
+                network_dir = os.path.join(case_dir, "network")
+                os.makedirs(network_dir, exist_ok=True)
+
+                case_export_path = os.path.join(network_dir, default_name)
+                import shutil
+                shutil.copy2(file_path, case_export_path)
+                print(f"Network connections also saved to case folder: {case_export_path}")
+
+                # Save to network folder if configured
+                network_case_path = self.current_case.get('network_case_path', '')
+                if network_case_path:
+                    try:
+                        network_export_dir = os.path.join(network_case_path, "network")
+                        os.makedirs(network_export_dir, exist_ok=True)
+                        network_export_path = os.path.join(network_export_dir, default_name)
+                        shutil.copy2(file_path, network_export_path)
+                        print(f"Network connections also saved to network folder: {network_export_path}")
+                    except Exception as e:
+                        print(f"Warning: Could not save to network folder: {e}")
+
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export: {str(e)}")
 
     # ==================== FILE VIEWER AND EXECUTOR ====================
     def view_file_hex(self, file_path, file_name):

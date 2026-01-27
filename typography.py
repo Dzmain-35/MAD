@@ -111,7 +111,7 @@ class Fonts:
     @staticmethod
     def monospace(size=None):
         """Font for code, logs, and technical data (uses Courier)"""
-        return (FONT_FAMILIES["mono"], size or 10)
+        return (FONT_FAMILIES["mono"], size or 13)
 
 
 # Legacy mapping for gradual migration

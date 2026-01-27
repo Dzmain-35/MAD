@@ -3043,7 +3043,7 @@ File Size: {file_info['file_size']} bytes"""
             wrap="none",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=Fonts.monospace(10),
+            font=Fonts.monospace(13),
             height=12,
             relief="flat",
             padx=10,
@@ -5027,7 +5027,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             wrap="word",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=Fonts.monospace(11),
+            font=Fonts.monospace(13),
             relief="flat",
             padx=20,
             pady=20
@@ -5188,7 +5188,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             wrap="none",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=Fonts.monospace(10),
+            font=Fonts.monospace(13),
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set
         )
@@ -5340,7 +5340,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 extraction_result = self.process_monitor.extract_strings_from_process(
                     pid,
                     min_length=extract_min_length,
-                    limit=20000,
+                    limit=100000,  # Increased limit to capture all strings
                     enable_quality_filter=use_quality_filter,
                     scan_mode=scan_mode,
                     progress_callback=progress_callback,
@@ -5360,16 +5360,16 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
                 if urls:
                     result_text += f"URLs/Domains ({len(urls)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(urls[:50]) + "\n\n"
+                    result_text += "\n".join(urls) + "\n\n"
                 if ips:
                     result_text += f"IP Addresses ({len(ips)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(ips[:50]) + "\n\n"
+                    result_text += "\n".join(ips) + "\n\n"
                 if paths:
                     result_text += f"File Paths ({len(paths)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(paths[:50]) + "\n\n"
+                    result_text += "\n".join(paths) + "\n\n"
                 if others:
                     result_text += f"Other Strings ({len(others)}):\n" + "="*80 + "\n"
-                    result_text += "\n".join(others[:200]) + "\n"
+                    result_text += "\n".join(others) + "\n"
 
                 # Store strings and full extraction result for export
                 all_strings_data["strings"] = strings
@@ -5398,6 +5398,9 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
                 # Auto-apply current filters after extraction
                 self.root.after(100, search_strings)
+
+                # Auto-save strings to case folders
+                self.save_strings_to_case_folders(strings, name, pid, scan_mode)
 
             except Exception as e:
                 import traceback
@@ -5968,7 +5971,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             wrap="none",
             bg="#1a1a1a",
             fg="#ffffff",
-            font=Fonts.monospace(10),
+            font=Fonts.monospace(13),
             yscrollcommand=vsb.set,
             xscrollcommand=hsb.set
         )
@@ -6636,7 +6639,7 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
             wrap="none",
             bg="#0d1520",
             fg="#ffffff",
-            font=("Courier New", 10),
+            font=("Courier New", 13),
             selectbackground="#2a4d6e",
             selectforeground="#ffffff"
         )
@@ -6714,7 +6717,7 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
             wrap="none",
             bg="#1a2332",
             fg="gray60",
-            font=("Courier New", 10),
+            font=("Courier New", 13),
             state="disabled",
             takefocus=0
         )
@@ -6725,7 +6728,7 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
             wrap="none",
             bg="#0d1520",
             fg="#ffffff",
-            font=("Courier New", 10),
+            font=("Courier New", 13),
             selectbackground="#2a4d6e",
             selectforeground="#ffffff"
         )
@@ -6810,6 +6813,132 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
         # Focus on the executed process (with slight delay to allow tree to refresh)
         if pid:
             self.root.after(500, lambda: self.focus_process_by_pid(pid))
+
+            # Auto-extract memory strings after process has time to initialize
+            if self.current_case:
+                self.root.after(3000, lambda: self._auto_extract_memory_strings(pid, file_name))
+
+
+    def _auto_extract_memory_strings(self, pid, file_name):
+        """
+        Auto-extract memory strings from an executed process and save to case folders
+
+        Args:
+            pid: Process ID to extract strings from
+            file_name: Name of the executed file
+        """
+        def extract_thread():
+            try:
+                import psutil
+                # Verify process is still running
+                if not psutil.pid_exists(pid):
+                    print(f"Process {pid} no longer exists - skipping auto string extraction")
+                    return
+
+                print(f"Auto-extracting memory strings from PID {pid} ({file_name})...")
+
+                # Extract strings using process monitor
+                extraction_result = self.process_monitor.extract_strings_from_process(
+                    pid,
+                    min_length=4,
+                    limit=100000,
+                    enable_quality_filter=True,
+                    scan_mode="quick",
+                    return_full_result=True
+                )
+
+                strings = extraction_result.get('strings', [])
+                if strings:
+                    # Save to case folders
+                    process_name = file_name.replace('.', '_')
+                    self.save_strings_to_case_folders(strings, process_name, pid, "auto_executed")
+                    print(f"Auto-extracted {len(strings)} strings from {file_name} (PID: {pid})")
+                else:
+                    print(f"No strings extracted from {file_name} (PID: {pid})")
+
+            except Exception as e:
+                print(f"Error in auto string extraction: {e}")
+
+        # Run extraction in background thread
+        threading.Thread(target=extract_thread, daemon=True).start()
+
+    def save_strings_to_case_folders(self, strings_data, process_name, pid, scan_mode="extracted"):
+        """
+        Save extracted strings to both local and network case folders
+
+        Args:
+            strings_data: List of extracted strings or dict with extraction result
+            process_name: Name of the process
+            pid: Process ID
+            scan_mode: Type of scan (quick, deep, extracted)
+        """
+        if not self.current_case:
+            print("No active case - strings not saved to case folder")
+            return
+
+        try:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{process_name}_{pid}_strings_{scan_mode}_{timestamp}.txt"
+
+            # Prepare content
+            if isinstance(strings_data, dict) and 'strings' in strings_data:
+                strings = strings_data.get('strings', [])
+            else:
+                strings = strings_data if isinstance(strings_data, list) else []
+
+            # Format content
+            content = f"Memory Strings Extraction Report\n"
+            content += f"{'='*80}\n"
+            content += f"Process: {process_name}\n"
+            content += f"PID: {pid}\n"
+            content += f"Scan Mode: {scan_mode}\n"
+            content += f"Timestamp: {datetime.now().isoformat()}\n"
+            content += f"Total Strings: {len(strings)}\n"
+            content += f"{'='*80}\n\n"
+
+            # Group strings by type for better organization
+            urls = [s for s in strings if ('http://' in s or 'https://' in s or 'www.' in s)]
+            paths = [s for s in strings if ('\\' in s or '/' in s) and len(s) > 10]
+            others = [s for s in strings if s not in urls and s not in paths]
+
+            if urls:
+                content += f"URLs/Domains ({len(urls)}):\n" + "-"*40 + "\n"
+                content += "\n".join(urls) + "\n\n"
+            if paths:
+                content += f"File Paths ({len(paths)}):\n" + "-"*40 + "\n"
+                content += "\n".join(paths) + "\n\n"
+            if others:
+                content += f"Other Strings ({len(others)}):\n" + "-"*40 + "\n"
+                content += "\n".join(others) + "\n"
+
+            # Save to local case folder
+            case_id = self.current_case.get('id')
+            local_case_dir = os.path.join(self.case_manager.case_storage_path, case_id)
+            strings_dir = os.path.join(local_case_dir, "strings")
+            os.makedirs(strings_dir, exist_ok=True)
+
+            local_path = os.path.join(strings_dir, filename)
+            with open(local_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(f"Strings saved to local case folder: {local_path}")
+
+            # Save to network case folder if configured
+            network_case_path = self.current_case.get('network_case_path', '')
+            if network_case_path:
+                try:
+                    network_strings_dir = os.path.join(network_case_path, "strings")
+                    os.makedirs(network_strings_dir, exist_ok=True)
+
+                    network_path = os.path.join(network_strings_dir, filename)
+                    with open(network_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    print(f"Strings saved to network case folder: {network_path}")
+                except Exception as e:
+                    print(f"Warning: Could not save strings to network folder: {e}")
+
+        except Exception as e:
+            print(f"Error saving strings to case folders: {e}")
 
 
 # Main entry point

@@ -1063,7 +1063,58 @@ class ForensicAnalysisGUI:
             justify="left"
         )
         self.network_stats_label.pack(padx=15, pady=10, anchor="w")
-        
+
+        # Filter frame
+        filter_frame = ctk.CTkFrame(frame, fg_color="gray20", corner_radius=10)
+        filter_frame.pack(fill="x", padx=20, pady=(0, 10))
+
+        filter_label = ctk.CTkLabel(filter_frame, text="Filters:", font=Fonts.label)
+        filter_label.pack(side="left", padx=(15, 10), pady=10)
+
+        # Search/filter entry
+        self.network_filter_entry = ctk.CTkEntry(
+            filter_frame, placeholder_text="Search IP, hostname, process...",
+            width=200, font=Fonts.body
+        )
+        self.network_filter_entry.pack(side="left", padx=5, pady=10)
+        self.network_filter_entry.bind("<KeyRelease>", lambda e: self.apply_network_filters())
+
+        # Status filter
+        ctk.CTkLabel(filter_frame, text="Status:", font=Fonts.body).pack(side="left", padx=(15, 5), pady=10)
+        self.network_status_filter = ctk.CTkOptionMenu(
+            filter_frame, values=["All", "ESTABLISHED", "LISTEN", "TIME_WAIT", "CLOSE_WAIT", "SYN_SENT"],
+            width=120, font=Fonts.body, command=lambda v: self.apply_network_filters()
+        )
+        self.network_status_filter.set("All")
+        self.network_status_filter.pack(side="left", padx=5, pady=10)
+
+        # Type filter
+        ctk.CTkLabel(filter_frame, text="Type:", font=Fonts.body).pack(side="left", padx=(15, 5), pady=10)
+        self.network_type_filter = ctk.CTkOptionMenu(
+            filter_frame, values=["All", "TCP", "UDP"],
+            width=80, font=Fonts.body, command=lambda v: self.apply_network_filters()
+        )
+        self.network_type_filter.set("All")
+        self.network_type_filter.pack(side="left", padx=5, pady=10)
+
+        # Suspicious only checkbox
+        self.network_suspicious_only = ctk.CTkCheckBox(
+            filter_frame, text="Suspicious Only", font=Fonts.body,
+            command=self.apply_network_filters
+        )
+        self.network_suspicious_only.pack(side="left", padx=15, pady=10)
+
+        # Clear filters button
+        btn_clear_filters = ctk.CTkButton(
+            filter_frame, text="Clear", width=60, height=28,
+            fg_color="gray40", hover_color="gray50",
+            command=self.clear_network_filters
+        )
+        btn_clear_filters.pack(side="right", padx=15, pady=10)
+
+        # Store all connections for filtering
+        self.all_network_connections = []
+
         # Connection list
         tree_frame = ctk.CTkFrame(frame, fg_color="gray20")
         tree_frame.pack(fill="both", expand=True, padx=20, pady=10)
@@ -1094,7 +1145,9 @@ class ForensicAnalysisGUI:
         self.network_tree.column("Suspicious", width=80, minwidth=60)
 
         # Configure tag colors
-        self.network_tree.tag_configure('suspicious', background='#5c1c1c')
+        self.network_tree.tag_configure('suspicious', background='#5c1c1c')  # Red for suspicious
+        self.network_tree.tag_configure('established', background='#1c4c1c')  # Green for established
+        self.network_tree.tag_configure('listening', background='#4c4c1c')  # Yellow for listening
 
         # Right-click context menu for network tree
         self.network_context_menu = tk.Menu(
@@ -6593,13 +6646,11 @@ Risk Level: {risk_level}"""
 
     def refresh_network_list(self):
         """Refresh network connections list"""
-        # Clear existing
-        for item in self.network_tree.get_children():
-            self.network_tree.delete(item)
-
         # Get connections
         connections = self.network_monitor.get_all_connections()
 
+        # Store all connections with resolved hostnames for filtering
+        self.all_network_connections = []
         for conn in connections:
             local_addr = f"{conn.get('local_ip', '')}:{conn.get('local_port', '')}"
             remote_addr = f"{conn.get('remote_ip', '')}:{conn.get('remote_port', '')}"
@@ -6608,23 +6659,20 @@ Risk Level: {risk_level}"""
             remote_ip = conn.get('remote_ip', '')
             hostname = self.resolve_hostname(remote_ip) if remote_ip else '-'
 
-            suspicious_text = "Yes" if conn.get('suspicious', False) else "No"
-            tags = ('suspicious',) if conn.get('suspicious', False) else ()
+            self.all_network_connections.append({
+                'type': conn.get('type', ''),
+                'local': local_addr,
+                'remote': remote_addr,
+                'hostname': hostname,
+                'status': conn.get('status', ''),
+                'process': conn.get('process_name', 'Unknown'),
+                'suspicious': conn.get('suspicious', False),
+                'remote_port': conn.get('remote_port', 0)
+            })
 
-            self.network_tree.insert(
-                "", "end",
-                values=(
-                    conn.get('type', ''),
-                    local_addr,
-                    remote_addr,
-                    hostname,
-                    conn.get('status', ''),
-                    conn.get('process_name', 'Unknown'),
-                    suspicious_text
-                ),
-                tags=tags
-            )
-        
+        # Apply filters and display
+        self.apply_network_filters()
+
         # Update stats
         if self.network_monitor_active:
             summary = self.network_monitor.get_connection_summary()
@@ -6632,6 +6680,82 @@ Risk Level: {risk_level}"""
 Active: {summary['active_connections']} | Total: {summary['total_connections']} | Suspicious: {summary['suspicious_connections']}
 Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_local_ports']}"""
             self.network_stats_label.configure(text=stats_text)
+
+    def apply_network_filters(self):
+        """Apply filters to network connections list"""
+        # Clear existing
+        for item in self.network_tree.get_children():
+            self.network_tree.delete(item)
+
+        # Get filter values
+        search_term = self.network_filter_entry.get().strip().lower()
+        status_filter = self.network_status_filter.get()
+        type_filter = self.network_type_filter.get()
+        suspicious_only = self.network_suspicious_only.get()
+
+        filtered_count = 0
+        for conn in self.all_network_connections:
+            # Apply status filter
+            if status_filter != "All" and conn['status'] != status_filter:
+                continue
+
+            # Apply type filter
+            if type_filter != "All" and conn['type'] != type_filter:
+                continue
+
+            # Apply suspicious only filter
+            if suspicious_only and not conn['suspicious']:
+                continue
+
+            # Apply search filter
+            if search_term:
+                searchable = f"{conn['local']} {conn['remote']} {conn['hostname']} {conn['process']}".lower()
+                if search_term not in searchable:
+                    continue
+
+            # Determine tags for coloring
+            tags = []
+            if conn['suspicious']:
+                tags.append('suspicious')
+            elif conn['status'] == 'ESTABLISHED':
+                tags.append('established')
+            elif conn['status'] == 'LISTEN':
+                tags.append('listening')
+
+            suspicious_text = "Yes" if conn['suspicious'] else "No"
+
+            self.network_tree.insert(
+                "", "end",
+                values=(
+                    conn['type'],
+                    conn['local'],
+                    conn['remote'],
+                    conn['hostname'],
+                    conn['status'],
+                    conn['process'],
+                    suspicious_text
+                ),
+                tags=tuple(tags)
+            )
+            filtered_count += 1
+
+        # Update filter status in stats if monitoring
+        if hasattr(self, 'all_network_connections'):
+            total = len(self.all_network_connections)
+            if filtered_count != total:
+                current_text = self.network_stats_label.cget("text")
+                if "| Showing:" not in current_text:
+                    self.network_stats_label.configure(
+                        text=f"{current_text}\n| Showing: {filtered_count}/{total} connections"
+                    )
+
+    def clear_network_filters(self):
+        """Clear all network filters"""
+        self.network_filter_entry.delete(0, "end")
+        self.network_status_filter.set("All")
+        self.network_type_filter.set("All")
+        self.network_suspicious_only.deselect()
+        self.apply_network_filters()
 
     # ==================== FILE VIEWER AND EXECUTOR ====================
     def view_file_hex(self, file_path, file_name):

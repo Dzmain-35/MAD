@@ -4904,6 +4904,15 @@ Errors: {scan_stats['errors']}"""
         details_window = ctk.CTkToplevel(self.root)
         details_window.title(f"Process Analysis: {name} (PID {pid})")
         details_window.geometry("1000x700")
+
+        # Track if window is still open to prevent widget access after destruction
+        window_state = {"closed": False}
+
+        def on_window_close():
+            window_state["closed"] = True
+            details_window.destroy()
+
+        details_window.protocol("WM_DELETE_WINDOW", on_window_close)
         
         # Main container
         main_container = ctk.CTkFrame(details_window, fg_color=self.colors["dark_blue"])
@@ -5201,7 +5210,13 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
         def search_strings(event=None):
             """Search and highlight strings with length filtering"""
-            search_term = search_entry.get().strip().lower()
+            # Check if window is still open
+            if window_state["closed"]:
+                return
+            try:
+                search_term = search_entry.get().strip().lower()
+            except Exception:
+                return  # Widget destroyed
 
             # Get length filter values
             try:
@@ -5283,24 +5298,40 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
         # Extract strings in background with progressive loading
         def extract(scan_mode="quick"):
+            # Helper to safely update UI widgets
+            def safe_update(func):
+                if not window_state["closed"]:
+                    try:
+                        self.root.after(0, func)
+                    except Exception:
+                        pass
+
             try:
+                # Check if window is still open
+                if window_state["closed"]:
+                    return
+
                 # Store current scan mode
                 all_strings_data["current_mode"] = scan_mode
 
                 # Update button states
                 if scan_mode == "quick":
-                    self.root.after(0, lambda: quick_scan_btn.configure(
+                    safe_update(lambda: quick_scan_btn.configure(
                         fg_color=self.colors["red"], text="⚡ Scanning..."))
-                    self.root.after(0, lambda: deep_scan_btn.configure(
+                    safe_update(lambda: deep_scan_btn.configure(
                         fg_color="transparent", text="🔬 Deep Scan"))
                 else:
-                    self.root.after(0, lambda: deep_scan_btn.configure(
+                    safe_update(lambda: deep_scan_btn.configure(
                         fg_color=self.colors["red"], text="🔬 Scanning..."))
-                    self.root.after(0, lambda: quick_scan_btn.configure(
+                    safe_update(lambda: quick_scan_btn.configure(
                         fg_color="transparent", text="⚡ Quick Scan"))
 
-                self.root.after(0, lambda: export_btn.configure(state="disabled"))
-                status_label.configure(text=f"Extracting strings ({scan_mode} mode)...")
+                safe_update(lambda: export_btn.configure(state="disabled"))
+                if not window_state["closed"]:
+                    try:
+                        status_label.configure(text=f"Extracting strings ({scan_mode} mode)...")
+                    except Exception:
+                        pass
 
                 # Get minimum length for extraction
                 try:
@@ -5315,6 +5346,9 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 # Progressive callback for UI updates
                 def progress_callback(current_strings, regions_total, regions_read, final=False):
                     """Update UI with progressive results"""
+                    # Skip if window is closed
+                    if window_state["closed"]:
+                        return
                     try:
                         # Flatten strings for display
                         flat_strings = []
@@ -5327,12 +5361,12 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                         if final:
                             status_msg = f"Complete: {len(flat_strings)} strings ({scan_mode} mode)"
 
-                        self.root.after(0, lambda msg=status_msg: status_label.configure(text=msg))
+                        safe_update(lambda msg=status_msg: status_label.configure(text=msg))
 
                         # Update display every 10 regions or on final
                         if final or regions_read % 10 == 0:
                             all_strings_data["strings"] = flat_strings
-                            self.root.after(0, search_strings)
+                            safe_update(search_strings)
                     except Exception as e:
                         print(f"Progress callback error: {e}")
 
@@ -5376,28 +5410,34 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 all_strings_data["original_text"] = result_text
                 all_strings_data["extraction_result"] = extraction_result  # Store full result with metadata
 
-                # Update UI in main thread
+                # Update UI in main thread (only if window still open)
+                if window_state["closed"]:
+                    # Still save to case folders even if window closed
+                    self.save_strings_to_case_folders(strings, name, pid, scan_mode)
+                    return
+
                 filter_status = "Quality Filtered" if use_quality_filter else "All Strings (Unfiltered)"
-                self.root.after(0, lambda: strings_text.configure(state="normal"))
-                self.root.after(0, lambda: strings_text.delete("1.0", "end"))
-                self.root.after(0, lambda: strings_text.insert("1.0", result_text))
-                self.root.after(0, lambda: strings_text.configure(state="disabled"))
-                self.root.after(0, lambda: status_label.configure(
+                safe_update(lambda: strings_text.configure(state="normal"))
+                safe_update(lambda: strings_text.delete("1.0", "end"))
+                safe_update(lambda: strings_text.insert("1.0", result_text))
+                safe_update(lambda: strings_text.configure(state="disabled"))
+                safe_update(lambda: status_label.configure(
                     text=f"Complete: {len(strings)} strings ({scan_mode} mode, {filter_status})"
                 ))
 
                 # Restore button states
                 if scan_mode == "quick":
-                    self.root.after(0, lambda: quick_scan_btn.configure(
+                    safe_update(lambda: quick_scan_btn.configure(
                         fg_color=self.colors["red"], text="⚡ Quick Scan"))
                 else:
-                    self.root.after(0, lambda: deep_scan_btn.configure(
+                    safe_update(lambda: deep_scan_btn.configure(
                         fg_color=self.colors["red"], text="🔬 Deep Scan"))
 
-                self.root.after(0, lambda: export_btn.configure(state="normal"))
+                safe_update(lambda: export_btn.configure(state="normal"))
 
                 # Auto-apply current filters after extraction
-                self.root.after(100, search_strings)
+                if not window_state["closed"]:
+                    self.root.after(100, search_strings)
 
                 # Auto-save strings to case folders
                 self.save_strings_to_case_folders(strings, name, pid, scan_mode)
@@ -5406,19 +5446,20 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 import traceback
                 traceback.print_exc()
 
-                self.root.after(0, lambda: strings_text.configure(state="normal"))
-                self.root.after(0, lambda: strings_text.delete("1.0", "end"))
-                self.root.after(0, lambda: strings_text.insert("1.0", f"Error: {str(e)}"))
-                self.root.after(0, lambda: strings_text.configure(state="disabled"))
-                self.root.after(0, lambda: status_label.configure(text="Error extracting strings"))
+                if not window_state["closed"]:
+                    safe_update(lambda: strings_text.configure(state="normal"))
+                    safe_update(lambda: strings_text.delete("1.0", "end"))
+                    safe_update(lambda: strings_text.insert("1.0", f"Error: {str(e)}"))
+                    safe_update(lambda: strings_text.configure(state="disabled"))
+                    safe_update(lambda: status_label.configure(text="Error extracting strings"))
 
-                # Restore button states
-                if scan_mode == "quick":
-                    self.root.after(0, lambda: quick_scan_btn.configure(text="⚡ Quick Scan"))
-                else:
-                    self.root.after(0, lambda: deep_scan_btn.configure(text="🔬 Deep Scan"))
+                    # Restore button states
+                    if scan_mode == "quick":
+                        safe_update(lambda: quick_scan_btn.configure(text="⚡ Quick Scan"))
+                    else:
+                        safe_update(lambda: deep_scan_btn.configure(text="🔬 Deep Scan"))
 
-                self.root.after(0, lambda: export_btn.configure(state="normal"))
+                    safe_update(lambda: export_btn.configure(state="normal"))
 
         def export_strings():
             """Export extracted strings to TXT file"""

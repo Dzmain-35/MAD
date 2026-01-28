@@ -728,7 +728,7 @@ class ForensicAnalysisGUI:
 
         # Notes text widget
         self.notes_textbox = tk.Text(
-            notes_container,
+            self.notes_container,
             wrap="word",
             bg="#1a1a1a",
             fg="#ffffff",

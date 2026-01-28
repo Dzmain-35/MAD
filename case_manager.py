@@ -1153,7 +1153,7 @@ Threat Score: {file_info.get('threat_score', 0)} ({file_info.get('threat_level',
     def save_file_details(self, storage_dir: str, filename: str, file_info: Dict):
         """
         Save individual file details to JSON
-        
+
         Args:
             storage_dir: Directory where file is stored
             filename: Name of the file
@@ -1162,6 +1162,112 @@ Threat Score: {file_info.get('threat_score', 0)} ({file_info.get('threat_level',
         details_path = os.path.join(storage_dir, f"{filename}_details.json")
         with open(details_path, 'w') as f:
             json.dump(file_info, f, indent=4)
+
+    def save_screenshot(self, image, description: str = "") -> Optional[str]:
+        """
+        Save a screenshot image to the current case's screenshots directory.
+
+        Args:
+            image: PIL Image object to save
+            description: Optional description for the screenshot
+
+        Returns:
+            Path to saved screenshot, or None if failed
+        """
+        if not self.current_case:
+            print("ERROR: No active case to save screenshot to")
+            return None
+
+        try:
+            case_id = self.current_case["id"]
+            case_dir = os.path.join(self.case_storage_path, case_id)
+            screenshots_dir = os.path.join(case_dir, "screenshots")
+
+            # Create screenshots directory if it doesn't exist
+            os.makedirs(screenshots_dir, exist_ok=True)
+
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"screenshot_{timestamp}.png"
+            filepath = os.path.join(screenshots_dir, filename)
+
+            # Save the image
+            image.save(filepath, "PNG")
+            print(f"Screenshot saved: {filepath}")
+
+            # Update case metadata with screenshot info
+            if "screenshots" not in self.current_case:
+                self.current_case["screenshots"] = []
+
+            screenshot_info = {
+                "filename": filename,
+                "filepath": filepath,
+                "timestamp": datetime.now().isoformat(),
+                "description": description
+            }
+            self.current_case["screenshots"].append(screenshot_info)
+
+            # Save updated case metadata
+            self.save_case_metadata(case_dir, self.current_case)
+
+            return filepath
+
+        except Exception as e:
+            print(f"ERROR saving screenshot: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def get_screenshots(self) -> List[Dict]:
+        """
+        Get list of screenshots for the current case.
+
+        Returns:
+            List of screenshot info dictionaries
+        """
+        if not self.current_case:
+            return []
+
+        return self.current_case.get("screenshots", [])
+
+    def delete_screenshot(self, filename: str) -> bool:
+        """
+        Delete a screenshot from the current case.
+
+        Args:
+            filename: Name of the screenshot file to delete
+
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        if not self.current_case:
+            return False
+
+        try:
+            case_id = self.current_case["id"]
+            case_dir = os.path.join(self.case_storage_path, case_id)
+            screenshots_dir = os.path.join(case_dir, "screenshots")
+            filepath = os.path.join(screenshots_dir, filename)
+
+            # Delete the file
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                print(f"Deleted screenshot: {filepath}")
+
+            # Remove from case metadata
+            screenshots = self.current_case.get("screenshots", [])
+            self.current_case["screenshots"] = [
+                s for s in screenshots if s["filename"] != filename
+            ]
+
+            # Save updated case metadata
+            self.save_case_metadata(case_dir, self.current_case)
+
+            return True
+
+        except Exception as e:
+            print(f"ERROR deleting screenshot: {e}")
+            return False
     
     def get_current_case(self) -> Optional[Dict]:
         """

@@ -250,9 +250,22 @@ class CaseManager:
             network_files_dir = os.path.join(network_path, "files")
 
             if os.path.exists(local_files_dir):
+                os.makedirs(network_files_dir, exist_ok=True)
                 for filename in os.listdir(local_files_dir):
                     src = os.path.join(local_files_dir, filename)
                     dst = os.path.join(network_files_dir, filename)
+                    if os.path.isfile(src):
+                        shutil.copy2(src, dst)
+
+            # Copy screenshots directory
+            local_screenshots_dir = os.path.join(case_dir, "screenshots")
+            network_screenshots_dir = os.path.join(network_path, "screenshots")
+
+            if os.path.exists(local_screenshots_dir):
+                os.makedirs(network_screenshots_dir, exist_ok=True)
+                for filename in os.listdir(local_screenshots_dir):
+                    src = os.path.join(local_screenshots_dir, filename)
+                    dst = os.path.join(network_screenshots_dir, filename)
                     if os.path.isfile(src):
                         shutil.copy2(src, dst)
 

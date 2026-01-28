@@ -12,7 +12,8 @@ strings:
 	
 
 condition:
-  $name or 2 of ($str*)
+  $name or 3 of ($str*)
 	
 }
+
 

@@ -91,6 +91,7 @@ class ForensicAnalysisGUI:
         self.auto_refresh_enabled = True
         self.auto_refresh_interval = self.settings_manager.get("application.auto_refresh_interval", 2000)
         self.auto_refresh_job = None
+        self.network_auto_refresh_job = None  # Separate auto-refresh for network
         self.pid_to_tree_item = {}  # Track PIDs to tree item IDs for incremental updates
         self.process_tree_initial_load = True  # Track if this is the first process list load
 
@@ -538,14 +539,14 @@ class ForensicAnalysisGUI:
         self.files_list_frame.pack(fill="x", pady=(0, 10))
 
         # IOCs section header - Clickable
-        iocs_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
-        iocs_header.pack(fill="x", pady=(10, 5))
+        self.iocs_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
+        self.iocs_header.pack(fill="x", pady=(10, 5))
 
-        iocs_header_inner = ctk.CTkFrame(iocs_header, fg_color="transparent", cursor="hand2")
+        iocs_header_inner = ctk.CTkFrame(self.iocs_header, fg_color="transparent", cursor="hand2")
         iocs_header_inner.pack(fill="x", padx=15, pady=10)
 
         # Expand indicator for IOCs
-        self.iocs_expand_indicator = ctk.CTkLabel(iocs_header_inner, text="▼",
+        self.iocs_expand_indicator = ctk.CTkLabel(iocs_header_inner, text="▶",
                                                   font=Fonts.body_large,
                                                   text_color="gray60",
                                                   cursor="hand2")
@@ -566,22 +567,22 @@ class ForensicAnalysisGUI:
         btn_add_ioc.pack(side="right")
 
         # IOCs container (collapsible)
-        iocs_container = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20")
-        iocs_container.pack(fill="x", pady=(0, 10))
+        self.iocs_container = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20")
+        self.iocs_container.pack(fill="x", pady=(0, 10))
 
         # IOCs content frame
-        self.iocs_content_frame = ctk.CTkFrame(iocs_container, fg_color="transparent")
+        self.iocs_content_frame = ctk.CTkFrame(self.iocs_container, fg_color="transparent")
         self.iocs_content_frame.pack(fill="both", expand=True, padx=15, pady=15)
 
         # Notes section header - Clickable
-        notes_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
-        notes_header.pack(fill="x", pady=(10, 5))
+        self.notes_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
+        self.notes_header.pack(fill="x", pady=(10, 5))
 
-        notes_header_inner = ctk.CTkFrame(notes_header, fg_color="transparent", cursor="hand2")
+        notes_header_inner = ctk.CTkFrame(self.notes_header, fg_color="transparent", cursor="hand2")
         notes_header_inner.pack(fill="x", padx=15, pady=10)
 
-        # Expand indicator for Notes
-        self.notes_expand_indicator = ctk.CTkLabel(notes_header_inner, text="▼",
+        # Expand indicator for Notes (starts collapsed)
+        self.notes_expand_indicator = ctk.CTkLabel(notes_header_inner, text="▶",
                                                    font=Fonts.body_large,
                                                    text_color="gray60",
                                                    cursor="hand2")
@@ -603,13 +604,13 @@ class ForensicAnalysisGUI:
         btn_save_notes.pack(side="right")
 
         # Notes text area (collapsible)
-        notes_container = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20")
-        notes_container.pack(fill="both", expand=True, pady=(0, 10))
+        self.notes_container = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20")
+        self.notes_container.pack(fill="both", expand=True, pady=(0, 10))
 
-        # Track visibility states
+        # Track visibility states (IOCs, Notes start collapsed)
         self.files_section_visible = [True]
-        self.iocs_section_visible = [True]
-        self.notes_section_visible = [True]
+        self.iocs_section_visible = [False]
+        self.notes_section_visible = [False]
 
         # Toggle function for files section
         def toggle_files_section(event=None):
@@ -627,7 +628,7 @@ class ForensicAnalysisGUI:
                 self.files_section_visible[0] = False
             else:
                 # Re-pack before the IOCs header to maintain position
-                self.files_list_frame.pack(fill="x", pady=(0, 10), before=iocs_header)
+                self.files_list_frame.pack(fill="x", pady=(0, 10), before=self.iocs_header)
                 self.files_expand_indicator.configure(text="▼")
                 self.files_section_visible[0] = True
 
@@ -642,12 +643,12 @@ class ForensicAnalysisGUI:
                     pass
 
             if self.iocs_section_visible[0]:
-                iocs_container.pack_forget()
+                self.iocs_container.pack_forget()
                 self.iocs_expand_indicator.configure(text="▶")
                 self.iocs_section_visible[0] = False
             else:
                 # Re-pack before the Notes header to maintain position
-                iocs_container.pack(fill="x", pady=(0, 10), before=notes_header)
+                self.iocs_container.pack(fill="x", pady=(0, 10), before=self.notes_header)
                 self.iocs_expand_indicator.configure(text="▼")
                 self.iocs_section_visible[0] = True
 
@@ -662,12 +663,12 @@ class ForensicAnalysisGUI:
                     pass
 
             if self.notes_section_visible[0]:
-                notes_container.pack_forget()
+                self.notes_container.pack_forget()
                 self.notes_expand_indicator.configure(text="▶")
                 self.notes_section_visible[0] = False
             else:
-                # Re-pack at end
-                notes_container.pack(fill="both", expand=True, pady=(0, 10))
+                # Re-pack before the Screenshots header to maintain position
+                self.notes_container.pack(fill="x", pady=(0, 10), before=self.screenshots_header)
                 self.notes_expand_indicator.configure(text="▼")
                 self.notes_section_visible[0] = True
 
@@ -678,13 +679,13 @@ class ForensicAnalysisGUI:
         self.files_expand_indicator.bind("<Button-1>", toggle_files_section)
 
         # Bind click events for IOCs section
-        iocs_header.bind("<Button-1>", toggle_iocs_section)
+        self.iocs_header.bind("<Button-1>", toggle_iocs_section)
         iocs_header_inner.bind("<Button-1>", toggle_iocs_section)
         iocs_title.bind("<Button-1>", toggle_iocs_section)
         self.iocs_expand_indicator.bind("<Button-1>", toggle_iocs_section)
 
         # Bind click events for Notes section
-        notes_header.bind("<Button-1>", toggle_notes_section)
+        self.notes_header.bind("<Button-1>", toggle_notes_section)
         notes_header_inner.bind("<Button-1>", toggle_notes_section)
         notes_title.bind("<Button-1>", toggle_notes_section)
         self.notes_expand_indicator.bind("<Button-1>", toggle_notes_section)
@@ -728,7 +729,7 @@ class ForensicAnalysisGUI:
 
         # Notes text widget
         self.notes_textbox = tk.Text(
-            notes_container,
+            self.notes_container,
             wrap="word",
             bg="#1a1a1a",
             fg="#ffffff",
@@ -739,7 +740,90 @@ class ForensicAnalysisGUI:
             height=8
         )
         self.notes_textbox.pack(fill="both", expand=True, padx=2, pady=2)
-        
+
+        # Screenshots section header - Clickable
+        self.screenshots_header = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20", cursor="hand2")
+        self.screenshots_header.pack(fill="x", pady=(10, 5))
+
+        screenshots_header_inner = ctk.CTkFrame(self.screenshots_header, fg_color="transparent", cursor="hand2")
+        screenshots_header_inner.pack(fill="x", padx=15, pady=10)
+
+        # Expand indicator for Screenshots (starts collapsed)
+        self.screenshots_expand_indicator = ctk.CTkLabel(screenshots_header_inner, text="▶",
+                                                         font=Fonts.body_large,
+                                                         text_color="gray60",
+                                                         cursor="hand2")
+        self.screenshots_expand_indicator.pack(side="left", padx=(0, 10))
+
+        screenshots_title = ctk.CTkLabel(screenshots_header_inner, text="Screenshots",
+                                         font=Fonts.title_medium,
+                                         text_color="white",
+                                         cursor="hand2")
+        screenshots_title.pack(side="left")
+
+        # Paste from Clipboard button
+        btn_paste_screenshot = ctk.CTkButton(screenshots_header_inner, text="📋 Paste from Clipboard",
+                                             command=self.handle_paste_screenshot,
+                                             height=30, width=160,
+                                             fg_color=self.colors["red"],
+                                             hover_color=self.colors["red_dark"],
+                                             font=Fonts.label)
+        btn_paste_screenshot.pack(side="right")
+
+        # Screenshots container (collapsible)
+        self.screenshots_container = ctk.CTkFrame(scroll_frame, corner_radius=10, fg_color="gray20")
+        self.screenshots_container.pack(fill="x", pady=(0, 10))
+
+        # Screenshots content frame - scrollable horizontally
+        self.screenshots_content_frame = ctk.CTkFrame(self.screenshots_container, fg_color="transparent")
+        self.screenshots_content_frame.pack(fill="both", expand=True, padx=15, pady=15)
+
+        # Info label when no screenshots
+        self.screenshots_empty_label = ctk.CTkLabel(
+            self.screenshots_content_frame,
+            text="No screenshots yet. Use Win+Shift+S to capture, then click 'Paste from Clipboard'",
+            font=Fonts.body,
+            text_color="gray60"
+        )
+        self.screenshots_empty_label.pack(pady=20)
+
+        # Thumbnail gallery frame
+        self.screenshots_gallery_frame = ctk.CTkFrame(self.screenshots_content_frame, fg_color="transparent")
+        self.screenshots_gallery_frame.pack(fill="x")
+
+        # Track screenshots section visibility (starts collapsed)
+        self.screenshots_section_visible = [False]
+
+        # Toggle function for Screenshots section
+        def toggle_screenshots_section(event=None):
+            # Prevent toggle when clicking the Paste button
+            if event and hasattr(event.widget, 'cget'):
+                try:
+                    if "Paste" in str(event.widget.cget('text')):
+                        return
+                except:
+                    pass
+
+            if self.screenshots_section_visible[0]:
+                self.screenshots_container.pack_forget()
+                self.screenshots_expand_indicator.configure(text="▶")
+                self.screenshots_section_visible[0] = False
+            else:
+                self.screenshots_container.pack(fill="x", pady=(0, 10))
+                self.screenshots_expand_indicator.configure(text="▼")
+                self.screenshots_section_visible[0] = True
+
+        # Bind click events for Screenshots section
+        self.screenshots_header.bind("<Button-1>", toggle_screenshots_section)
+        screenshots_header_inner.bind("<Button-1>", toggle_screenshots_section)
+        screenshots_title.bind("<Button-1>", toggle_screenshots_section)
+        self.screenshots_expand_indicator.bind("<Button-1>", toggle_screenshots_section)
+
+        # Collapse IOCs, Notes, and Screenshots sections by default
+        self.iocs_container.pack_forget()
+        self.notes_container.pack_forget()
+        self.screenshots_container.pack_forget()
+
         self.tabs["current_case"] = frame
         
     # ==================== ANALYSIS TAB ====================
@@ -2140,6 +2224,10 @@ class ForensicAnalysisGUI:
                 fg_color=self.colors["red"],
                 border_width=0
             )
+            # Auto-start network monitoring if not already active
+            if not self.network_monitor_active:
+                print("[GUI] Auto-starting Network monitoring...")
+                self.toggle_network_monitoring()
         elif subtab_name == "live_events":
             self.btn_live_events.configure(
                 fg_color=self.colors["red"],
@@ -2791,7 +2879,271 @@ class ForensicAnalysisGUI:
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save notes: {str(e)}")
-    
+
+    def handle_paste_screenshot(self):
+        """Paste screenshot from clipboard and save to case"""
+        if not self.current_case:
+            messagebox.showwarning("No Case", "No active case to add screenshot to")
+            return
+
+        try:
+            from PIL import ImageGrab
+
+            # Try to get image from clipboard
+            image = ImageGrab.grabclipboard()
+
+            if image is None:
+                messagebox.showwarning(
+                    "No Image",
+                    "No image found in clipboard.\n\n"
+                    "To capture a screenshot:\n"
+                    "1. Press Win+Shift+S\n"
+                    "2. Select the area to capture\n"
+                    "3. Click 'Paste from Clipboard' again"
+                )
+                return
+
+            # Check if it's an image (could be file paths on some systems)
+            if not hasattr(image, 'save'):
+                messagebox.showwarning(
+                    "Invalid Image",
+                    "Clipboard contains data but not an image.\n"
+                    "Please capture a screenshot first."
+                )
+                return
+
+            # Save the screenshot
+            filepath = self.case_manager.save_screenshot(image)
+
+            if filepath:
+                # Refresh the screenshots display
+                self.refresh_screenshots_display()
+                messagebox.showinfo(
+                    "Success",
+                    f"Screenshot saved!\n\nLocation:\n{filepath}"
+                )
+            else:
+                messagebox.showerror("Error", "Failed to save screenshot")
+
+        except ImportError:
+            messagebox.showerror(
+                "Missing Library",
+                "PIL/Pillow is required for screenshot functionality.\n"
+                "Install with: pip install Pillow"
+            )
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to paste screenshot: {str(e)}")
+
+    def refresh_screenshots_display(self):
+        """Refresh the screenshots gallery in the Current Case tab"""
+        if not self.current_case:
+            return
+
+        # Clear existing thumbnails
+        for widget in self.screenshots_gallery_frame.winfo_children():
+            widget.destroy()
+
+        screenshots = self.case_manager.get_screenshots()
+
+        if not screenshots:
+            # Show empty label
+            self.screenshots_empty_label.pack(pady=20)
+            return
+        else:
+            # Hide empty label
+            self.screenshots_empty_label.pack_forget()
+
+        # Create thumbnail grid
+        row = 0
+        col = 0
+        max_cols = 4  # 4 thumbnails per row
+
+        for screenshot_info in screenshots:
+            filepath = screenshot_info.get("filepath", "")
+            filename = screenshot_info.get("filename", "")
+            timestamp = screenshot_info.get("timestamp", "")
+
+            if not os.path.exists(filepath):
+                continue
+
+            try:
+                # Create thumbnail frame
+                thumb_frame = ctk.CTkFrame(self.screenshots_gallery_frame,
+                                           fg_color="#1a1a1a",
+                                           corner_radius=8)
+                thumb_frame.grid(row=row, column=col, padx=5, pady=5, sticky="nw")
+
+                # Load and create thumbnail
+                pil_image = Image.open(filepath)
+                thumb_size = (150, 100)
+                pil_image.thumbnail(thumb_size, Image.Resampling.LANCZOS)
+
+                ctk_image = ctk.CTkImage(
+                    light_image=pil_image,
+                    dark_image=pil_image,
+                    size=(pil_image.width, pil_image.height)
+                )
+
+                # Thumbnail label (clickable)
+                thumb_label = ctk.CTkLabel(
+                    thumb_frame,
+                    image=ctk_image,
+                    text="",
+                    cursor="hand2"
+                )
+                thumb_label.image = ctk_image  # Keep reference
+                thumb_label.pack(padx=5, pady=5)
+
+                # Bind click to enlarge
+                thumb_label.bind("<Button-1>",
+                                 lambda e, fp=filepath: self.show_enlarged_screenshot(fp))
+
+                # Timestamp label
+                if timestamp:
+                    try:
+                        dt = datetime.fromisoformat(timestamp)
+                        time_str = dt.strftime("%m/%d %H:%M")
+                    except:
+                        time_str = ""
+                else:
+                    time_str = ""
+
+                info_frame = ctk.CTkFrame(thumb_frame, fg_color="transparent")
+                info_frame.pack(fill="x", padx=5, pady=(0, 5))
+
+                time_label = ctk.CTkLabel(
+                    info_frame,
+                    text=time_str,
+                    font=Fonts.helper,
+                    text_color="gray60"
+                )
+                time_label.pack(side="left")
+
+                # Delete button
+                delete_btn = ctk.CTkButton(
+                    info_frame,
+                    text="X",
+                    width=20,
+                    height=20,
+                    fg_color="#5c1c1c",
+                    hover_color=self.colors["red"],
+                    font=Fonts.helper,
+                    command=lambda fn=filename: self.delete_screenshot(fn)
+                )
+                delete_btn.pack(side="right")
+
+                # Move to next position
+                col += 1
+                if col >= max_cols:
+                    col = 0
+                    row += 1
+
+            except Exception as e:
+                print(f"Error creating thumbnail for {filename}: {e}")
+
+    def show_enlarged_screenshot(self, filepath):
+        """Show an enlarged view of a screenshot"""
+        if not os.path.exists(filepath):
+            messagebox.showerror("Error", "Screenshot file not found")
+            return
+
+        try:
+            # Create popup window
+            popup = ctk.CTkToplevel(self.root)
+            popup.title("Screenshot Viewer")
+            popup.transient(self.root)
+
+            # Load full image
+            pil_image = Image.open(filepath)
+
+            # Calculate size to fit screen (max 80% of screen)
+            screen_width = popup.winfo_screenwidth()
+            screen_height = popup.winfo_screenheight()
+            max_width = int(screen_width * 0.8)
+            max_height = int(screen_height * 0.8)
+
+            # Scale image if needed
+            img_width, img_height = pil_image.size
+            if img_width > max_width or img_height > max_height:
+                ratio = min(max_width / img_width, max_height / img_height)
+                new_width = int(img_width * ratio)
+                new_height = int(img_height * ratio)
+                pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            else:
+                new_width, new_height = img_width, img_height
+
+            # Set window size
+            popup.geometry(f"{new_width + 40}x{new_height + 80}")
+
+            # Center the window
+            popup.update_idletasks()
+            x = (screen_width // 2) - ((new_width + 40) // 2)
+            y = (screen_height // 2) - ((new_height + 80) // 2)
+            popup.geometry(f"+{x}+{y}")
+
+            # Create image
+            ctk_image = ctk.CTkImage(
+                light_image=pil_image,
+                dark_image=pil_image,
+                size=(new_width, new_height)
+            )
+
+            # Image label
+            img_label = ctk.CTkLabel(popup, image=ctk_image, text="")
+            img_label.image = ctk_image
+            img_label.pack(padx=20, pady=10)
+
+            # Button frame
+            btn_frame = ctk.CTkFrame(popup, fg_color="transparent")
+            btn_frame.pack(pady=10)
+
+            # Open in Explorer button
+            def open_in_explorer():
+                folder = os.path.dirname(filepath)
+                if platform.system() == "Windows":
+                    os.startfile(folder)
+                elif platform.system() == "Darwin":
+                    subprocess.run(["open", folder])
+                else:
+                    subprocess.run(["xdg-open", folder])
+
+            btn_folder = ctk.CTkButton(
+                btn_frame,
+                text="Open Folder",
+                command=open_in_explorer,
+                width=100,
+                fg_color=self.colors["navy"],
+                hover_color=self.colors["dark_blue"]
+            )
+            btn_folder.pack(side="left", padx=5)
+
+            btn_close = ctk.CTkButton(
+                btn_frame,
+                text="Close",
+                command=popup.destroy,
+                width=100,
+                fg_color="gray40",
+                hover_color="gray30"
+            )
+            btn_close.pack(side="left", padx=5)
+
+            # Close on Escape key
+            popup.bind("<Escape>", lambda e: popup.destroy())
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to display screenshot: {str(e)}")
+
+    def delete_screenshot(self, filename):
+        """Delete a screenshot from the current case"""
+        if not self.current_case:
+            return
+
+        if messagebox.askyesno("Confirm Delete", f"Delete screenshot '{filename}'?"):
+            if self.case_manager.delete_screenshot(filename):
+                self.refresh_screenshots_display()
+            else:
+                messagebox.showerror("Error", "Failed to delete screenshot")
+
     # ==================== DISPLAY UPDATES ====================
     def update_current_case_display(self):
         """Update the current case tab display"""
@@ -2844,6 +3196,9 @@ class ForensicAnalysisGUI:
 
         # Refresh IOCs display
         self.refresh_iocs_display()
+
+        # Refresh screenshots display
+        self.refresh_screenshots_display()
 
     def create_file_card(self, file_info):
         """Create an expandable card for displaying file information"""
@@ -6542,10 +6897,39 @@ Risk Level: {risk_level}"""
             self.network_monitor.start_monitoring()
             self.network_monitor_active = True
             self.btn_toggle_network_monitor.configure(text="⏸ Stop Monitoring")
+            # Start auto-refresh for network
+            self.start_network_auto_refresh()
+            # Do initial refresh
+            self.refresh_network_list()
         else:
             self.network_monitor.stop_monitoring()
             self.network_monitor_active = False
             self.btn_toggle_network_monitor.configure(text="▶ Start Monitoring")
+            # Stop auto-refresh when monitoring stops
+            self.stop_network_auto_refresh()
+
+    def start_network_auto_refresh(self):
+        """Start automatic network connections refresh"""
+        if not self.auto_refresh_enabled:
+            return
+
+        # Cancel any existing job
+        if self.network_auto_refresh_job:
+            self.root.after_cancel(self.network_auto_refresh_job)
+
+        # Schedule next refresh
+        def network_auto_refresh_callback():
+            if self.network_monitor_active and self.auto_refresh_enabled:
+                self.refresh_network_list()
+                self.network_auto_refresh_job = self.root.after(self.auto_refresh_interval, network_auto_refresh_callback)
+
+        self.network_auto_refresh_job = self.root.after(self.auto_refresh_interval, network_auto_refresh_callback)
+
+    def stop_network_auto_refresh(self):
+        """Stop automatic network connections refresh"""
+        if self.network_auto_refresh_job:
+            self.root.after_cancel(self.network_auto_refresh_job)
+            self.network_auto_refresh_job = None
     
     def show_network_context_menu(self, event):
         """Show right-click context menu for network connections"""

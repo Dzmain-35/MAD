@@ -91,6 +91,7 @@ class ForensicAnalysisGUI:
         self.auto_refresh_enabled = True
         self.auto_refresh_interval = self.settings_manager.get("application.auto_refresh_interval", 2000)
         self.auto_refresh_job = None
+        self.network_auto_refresh_job = None  # Separate auto-refresh for network
         self.pid_to_tree_item = {}  # Track PIDs to tree item IDs for incremental updates
         self.process_tree_initial_load = True  # Track if this is the first process list load
 
@@ -2223,6 +2224,10 @@ class ForensicAnalysisGUI:
                 fg_color=self.colors["red"],
                 border_width=0
             )
+            # Auto-start network monitoring if not already active
+            if not self.network_monitor_active:
+                print("[GUI] Auto-starting Network monitoring...")
+                self.toggle_network_monitoring()
         elif subtab_name == "live_events":
             self.btn_live_events.configure(
                 fg_color=self.colors["red"],
@@ -6892,10 +6897,39 @@ Risk Level: {risk_level}"""
             self.network_monitor.start_monitoring()
             self.network_monitor_active = True
             self.btn_toggle_network_monitor.configure(text="⏸ Stop Monitoring")
+            # Start auto-refresh for network
+            self.start_network_auto_refresh()
+            # Do initial refresh
+            self.refresh_network_list()
         else:
             self.network_monitor.stop_monitoring()
             self.network_monitor_active = False
             self.btn_toggle_network_monitor.configure(text="▶ Start Monitoring")
+            # Stop auto-refresh when monitoring stops
+            self.stop_network_auto_refresh()
+
+    def start_network_auto_refresh(self):
+        """Start automatic network connections refresh"""
+        if not self.auto_refresh_enabled:
+            return
+
+        # Cancel any existing job
+        if self.network_auto_refresh_job:
+            self.root.after_cancel(self.network_auto_refresh_job)
+
+        # Schedule next refresh
+        def network_auto_refresh_callback():
+            if self.network_monitor_active and self.auto_refresh_enabled:
+                self.refresh_network_list()
+                self.network_auto_refresh_job = self.root.after(self.auto_refresh_interval, network_auto_refresh_callback)
+
+        self.network_auto_refresh_job = self.root.after(self.auto_refresh_interval, network_auto_refresh_callback)
+
+    def stop_network_auto_refresh(self):
+        """Stop automatic network connections refresh"""
+        if self.network_auto_refresh_job:
+            self.root.after_cancel(self.network_auto_refresh_job)
+            self.network_auto_refresh_job = None
     
     def show_network_context_menu(self, event):
         """Show right-click context menu for network connections"""

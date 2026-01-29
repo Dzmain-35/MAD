@@ -5122,6 +5122,16 @@ File Size: {file_info['file_size']} bytes"""
                     # Update the badge display
                     self.root.after(0, self.update_yara_match_badge)
 
+                    # Save strings to case when YARA rule matches
+                    if strings and self.current_case:
+                        try:
+                            proc = __import__('psutil').Process(pid)
+                            process_name = proc.name().replace('.', '_')
+                        except:
+                            process_name = f"pid_{pid}"
+                        scan_mode = f"yara_{rule.replace(' ', '_')}"
+                        self.save_strings_to_case_folders(strings, process_name, pid, scan_mode)
+
                     # Check if we should show popup (limits to 3 per rule family)
                     if not self.should_show_popup(rule):
                         # Popup suppressed, but match still counted and visible in filter
@@ -5342,6 +5352,12 @@ Risk Level: {risk_level}"""
                         # Update stats
                         if matches_found and rule != 'No_YARA_Hit':
                             scan_stats['threats'] += 1
+                            # Save strings to case when YARA rule matches
+                            strings = result.get('strings', [])
+                            if strings and self.current_case:
+                                process_name = proc['name'].replace('.', '_')
+                                scan_mode = f"yara_{rule.replace(' ', '_')}"
+                                self.save_strings_to_case_folders(strings, process_name, pid, scan_mode)
                         else:
                             scan_stats['benign'] += 1
                     else:
@@ -6799,6 +6815,13 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             # Update the badge display
             self.root.after(0, self.update_yara_match_badge)
 
+            # Save strings to case when YARA rule matches
+            if strings and self.current_case:
+                process_name = proc_info.get('name', 'unknown').replace('.', '_')
+                pid = proc_info.get('pid', 0)
+                scan_mode = f"yara_{rule.replace(' ', '_')}"
+                self.save_strings_to_case_folders(strings, process_name, pid, scan_mode)
+
             # Check if we should show popup (limits to 3 per rule family)
             if not self.should_show_popup(rule):
                 # Popup suppressed, but match still counted and visible in filter
@@ -7602,10 +7625,6 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
         # Focus on the executed process (with slight delay to allow tree to refresh)
         if pid:
             self.root.after(500, lambda: self.focus_process_by_pid(pid))
-
-            # Auto-extract memory strings after process has time to initialize
-            if self.current_case:
-                self.root.after(3000, lambda: self._auto_extract_memory_strings(pid, file_name))
 
 
     def _auto_extract_memory_strings(self, pid, file_name):

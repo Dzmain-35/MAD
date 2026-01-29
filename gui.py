@@ -3559,10 +3559,10 @@ File Size: {file_info['file_size']} bytes"""
             file_path = file_info.get('storage_path', '')
             file_name = file_info['filename']
 
-            # Remove file from disk
+            # Remove file from local disk
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
-                print(f"✓ Deleted file: {file_path}")
+                print(f"Deleted file: {file_path}")
 
                 # Also remove the _details.json file
                 details_path = file_path + "_details.json"
@@ -3573,6 +3573,34 @@ File Size: {file_info['file_size']} bytes"""
                 decoded_path = file_path + "_decoded.txt"
                 if os.path.exists(decoded_path):
                     os.remove(decoded_path)
+
+            # Remove file from network folder if configured
+            network_case_path = self.current_case.get('network_case_path', '')
+            if network_case_path:
+                def delete_from_network():
+                    try:
+                        network_files_dir = os.path.join(network_case_path, "files")
+                        network_file_path = os.path.join(network_files_dir, file_name)
+
+                        if os.path.exists(network_file_path):
+                            os.remove(network_file_path)
+                            print(f"Deleted file from network: {network_file_path}")
+
+                        # Also remove _details.json from network
+                        network_details_path = network_file_path + "_details.json"
+                        if os.path.exists(network_details_path):
+                            os.remove(network_details_path)
+
+                        # Remove decoded file from network if exists
+                        network_decoded_path = network_file_path + "_decoded.txt"
+                        if os.path.exists(network_decoded_path):
+                            os.remove(network_decoded_path)
+
+                    except Exception as e:
+                        print(f"Warning: Could not delete file from network folder: {e}")
+
+                # Run network deletion in background thread
+                threading.Thread(target=delete_from_network, daemon=True).start()
 
             # Remove from current case files list
             if file_info in self.current_case["files"]:

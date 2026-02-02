@@ -3559,10 +3559,10 @@ File Size: {file_info['file_size']} bytes"""
             file_path = file_info.get('storage_path', '')
             file_name = file_info['filename']
 
-            # Remove file from disk
+            # Remove file from local disk
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
-                print(f"✓ Deleted file: {file_path}")
+                print(f"Deleted file: {file_path}")
 
                 # Also remove the _details.json file
                 details_path = file_path + "_details.json"
@@ -3573,6 +3573,34 @@ File Size: {file_info['file_size']} bytes"""
                 decoded_path = file_path + "_decoded.txt"
                 if os.path.exists(decoded_path):
                     os.remove(decoded_path)
+
+            # Remove file from network folder if configured
+            network_case_path = self.current_case.get('network_case_path', '')
+            if network_case_path:
+                def delete_from_network():
+                    try:
+                        network_files_dir = os.path.join(network_case_path, "files")
+                        network_file_path = os.path.join(network_files_dir, file_name)
+
+                        if os.path.exists(network_file_path):
+                            os.remove(network_file_path)
+                            print(f"Deleted file from network: {network_file_path}")
+
+                        # Also remove _details.json from network
+                        network_details_path = network_file_path + "_details.json"
+                        if os.path.exists(network_details_path):
+                            os.remove(network_details_path)
+
+                        # Remove decoded file from network if exists
+                        network_decoded_path = network_file_path + "_decoded.txt"
+                        if os.path.exists(network_decoded_path):
+                            os.remove(network_decoded_path)
+
+                    except Exception as e:
+                        print(f"Warning: Could not delete file from network folder: {e}")
+
+                # Run network deletion in background thread
+                threading.Thread(target=delete_from_network, daemon=True).start()
 
             # Remove from current case files list
             if file_info in self.current_case["files"]:
@@ -5094,6 +5122,16 @@ File Size: {file_info['file_size']} bytes"""
                     # Update the badge display
                     self.root.after(0, self.update_yara_match_badge)
 
+                    # Save strings to case when YARA rule matches
+                    if strings and self.current_case:
+                        try:
+                            proc = __import__('psutil').Process(pid)
+                            process_name = proc.name().replace('.', '_')
+                        except:
+                            process_name = f"pid_{pid}"
+                        scan_mode = f"yara_{rule.replace(' ', '_')}"
+                        self.save_strings_to_case_folders(strings, process_name, pid, scan_mode)
+
                     # Check if we should show popup (limits to 3 per rule family)
                     if not self.should_show_popup(rule):
                         # Popup suppressed, but match still counted and visible in filter
@@ -5314,6 +5352,12 @@ Risk Level: {risk_level}"""
                         # Update stats
                         if matches_found and rule != 'No_YARA_Hit':
                             scan_stats['threats'] += 1
+                            # Save strings to case when YARA rule matches
+                            strings = result.get('strings', [])
+                            if strings and self.current_case:
+                                process_name = proc['name'].replace('.', '_')
+                                scan_mode = f"yara_{rule.replace(' ', '_')}"
+                                self.save_strings_to_case_folders(strings, process_name, pid, scan_mode)
                         else:
                             scan_stats['benign'] += 1
                     else:
@@ -6771,6 +6815,13 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             # Update the badge display
             self.root.after(0, self.update_yara_match_badge)
 
+            # Save strings to case when YARA rule matches
+            if strings and self.current_case:
+                process_name = proc_info.get('name', 'unknown').replace('.', '_')
+                pid = proc_info.get('pid', 0)
+                scan_mode = f"yara_{rule.replace(' ', '_')}"
+                self.save_strings_to_case_folders(strings, process_name, pid, scan_mode)
+
             # Check if we should show popup (limits to 3 per rule family)
             if not self.should_show_popup(rule):
                 # Popup suppressed, but match still counted and visible in filter
@@ -7575,10 +7626,6 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
         if pid:
             self.root.after(500, lambda: self.focus_process_by_pid(pid))
 
-            # Auto-extract memory strings after process has time to initialize
-            if self.current_case:
-                self.root.after(3000, lambda: self._auto_extract_memory_strings(pid, file_name))
-
 
     def _auto_extract_memory_strings(self, pid, file_name):
         """
@@ -7625,7 +7672,8 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
 
     def save_strings_to_case_folders(self, strings_data, process_name, pid, scan_mode="extracted"):
         """
-        Save extracted strings to both local and network case folders
+        Save extracted strings to both local and network case folders.
+        Runs entirely in background thread to prevent UI slowdown.
 
         Args:
             strings_data: List of extracted strings or dict with extraction result
@@ -7637,57 +7685,60 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
             print("No active case - strings not saved to case folder")
             return
 
-        try:
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{process_name}_{pid}_strings_{scan_mode}_{timestamp}.txt"
+        # Capture current case info before starting thread
+        case_id = self.current_case.get('id')
+        network_case_path = self.current_case.get('network_case_path', '')
+        case_storage_path = self.case_manager.case_storage_path
 
-            # Prepare content
-            if isinstance(strings_data, dict) and 'strings' in strings_data:
-                strings = strings_data.get('strings', [])
-            else:
-                strings = strings_data if isinstance(strings_data, list) else []
+        def save_in_background():
+            try:
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{process_name}_{pid}_strings_{scan_mode}_{timestamp}.txt"
 
-            # Format content
-            content = f"Memory Strings Extraction Report\n"
-            content += f"{'='*80}\n"
-            content += f"Process: {process_name}\n"
-            content += f"PID: {pid}\n"
-            content += f"Scan Mode: {scan_mode}\n"
-            content += f"Timestamp: {datetime.now().isoformat()}\n"
-            content += f"Total Strings: {len(strings)}\n"
-            content += f"{'='*80}\n\n"
+                # Prepare content
+                if isinstance(strings_data, dict) and 'strings' in strings_data:
+                    strings = strings_data.get('strings', [])
+                else:
+                    strings = strings_data if isinstance(strings_data, list) else []
 
-            # Group strings by type for better organization
-            urls = [s for s in strings if ('http://' in s or 'https://' in s or 'www.' in s)]
-            paths = [s for s in strings if ('\\' in s or '/' in s) and len(s) > 10]
-            others = [s for s in strings if s not in urls and s not in paths]
+                # Format content
+                content = f"Memory Strings Extraction Report\n"
+                content += f"{'='*80}\n"
+                content += f"Process: {process_name}\n"
+                content += f"PID: {pid}\n"
+                content += f"Scan Mode: {scan_mode}\n"
+                content += f"Timestamp: {datetime.now().isoformat()}\n"
+                content += f"Total Strings: {len(strings)}\n"
+                content += f"{'='*80}\n\n"
 
-            if urls:
-                content += f"URLs/Domains ({len(urls)}):\n" + "-"*40 + "\n"
-                content += "\n".join(urls) + "\n\n"
-            if paths:
-                content += f"File Paths ({len(paths)}):\n" + "-"*40 + "\n"
-                content += "\n".join(paths) + "\n\n"
-            if others:
-                content += f"Other Strings ({len(others)}):\n" + "-"*40 + "\n"
-                content += "\n".join(others) + "\n"
+                # Group strings by type for better organization
+                urls = [s for s in strings if ('http://' in s or 'https://' in s or 'www.' in s)]
+                paths = [s for s in strings if ('\\' in s or '/' in s) and len(s) > 10]
+                others = [s for s in strings if s not in urls and s not in paths]
 
-            # Save to local case folder (synchronous - fast local disk)
-            case_id = self.current_case.get('id')
-            local_case_dir = os.path.join(self.case_manager.case_storage_path, case_id)
-            strings_dir = os.path.join(local_case_dir, "strings")
-            os.makedirs(strings_dir, exist_ok=True)
+                if urls:
+                    content += f"URLs/Domains ({len(urls)}):\n" + "-"*40 + "\n"
+                    content += "\n".join(urls) + "\n\n"
+                if paths:
+                    content += f"File Paths ({len(paths)}):\n" + "-"*40 + "\n"
+                    content += "\n".join(paths) + "\n\n"
+                if others:
+                    content += f"Other Strings ({len(others)}):\n" + "-"*40 + "\n"
+                    content += "\n".join(others) + "\n"
 
-            local_path = os.path.join(strings_dir, filename)
-            with open(local_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            print(f"Strings saved to local case folder: {local_path}")
+                # Save to local case folder
+                local_case_dir = os.path.join(case_storage_path, case_id)
+                strings_dir = os.path.join(local_case_dir, "strings")
+                os.makedirs(strings_dir, exist_ok=True)
 
-            # Save to network case folder asynchronously (non-blocking)
-            network_case_path = self.current_case.get('network_case_path', '')
-            if network_case_path:
-                def save_to_network():
+                local_path = os.path.join(strings_dir, filename)
+                with open(local_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                print(f"Strings saved to local case folder: {local_path}")
+
+                # Save to network case folder if configured
+                if network_case_path:
                     try:
                         network_strings_dir = os.path.join(network_case_path, "strings")
                         os.makedirs(network_strings_dir, exist_ok=True)
@@ -7699,11 +7750,11 @@ Unique IPs: {summary['unique_remote_ips']} | Unique Ports: {summary['unique_loca
                     except Exception as e:
                         print(f"Warning: Could not save strings to network folder: {e}")
 
-                # Run network save in background thread
-                threading.Thread(target=save_to_network, daemon=True).start()
+            except Exception as e:
+                print(f"Error saving strings to case folders: {e}")
 
-        except Exception as e:
-            print(f"Error saving strings to case folders: {e}")
+        # Run entire save operation in background thread
+        threading.Thread(target=save_in_background, daemon=True).start()
 
 
 # Main entry point

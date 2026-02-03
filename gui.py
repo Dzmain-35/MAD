@@ -5728,8 +5728,11 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         # Store original strings and extraction result for export
         all_strings_data = {"strings": [], "original_text": "", "extraction_result": None, "current_mode": "quick"}
 
+        # Cache for filtered strings to avoid recomputation
+        filter_cache = {"min_len": None, "max_len": None, "filtered": None}
+
         def search_strings(event=None):
-            """Search and highlight strings with length filtering"""
+            """Search and highlight strings with length filtering (optimized)"""
             # Check if window is still open - robust check
             if window_state["closed"]:
                 return
@@ -5760,18 +5763,32 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             strings_text.configure(state="normal")
             strings_text.delete("1.0", "end")
 
-            # Apply length filter first
-            length_filtered = [s for s in all_strings_data["strings"] if min_len <= len(s) <= max_len]
+            # Use cached length-filtered results if filters haven't changed
+            if (filter_cache["min_len"] == min_len and
+                filter_cache["max_len"] == max_len and
+                filter_cache["filtered"] is not None):
+                length_filtered = filter_cache["filtered"]
+            else:
+                # Recompute length filter
+                length_filtered = [s for s in all_strings_data["strings"] if min_len <= len(s) <= max_len]
+                filter_cache["min_len"] = min_len
+                filter_cache["max_len"] = max_len
+                filter_cache["filtered"] = length_filtered
+
+            # Display limit for performance
+            DISPLAY_LIMIT = 500
 
             if not search_term:
                 # Show all strings (with length filter applied)
                 if length_filtered:
-                    display_text = "\n".join(length_filtered[:1000])  # Limit display for performance
+                    display_strings = length_filtered[:DISPLAY_LIMIT]
+                    display_text = "\n".join(display_strings)
                     strings_text.insert("1.0", display_text)
                     filter_msg = ""
                     if min_len > 0 or max_len < float('inf'):
-                        filter_msg = f" (filtered by length: {min_len}-{max_len if max_len != float('inf') else '∞'})"
-                    status_label.configure(text=f"Showing: {len(length_filtered)} strings{filter_msg}")
+                        filter_msg = f" (length: {min_len}-{max_len if max_len != float('inf') else '∞'})"
+                    showing_msg = f"Showing {len(display_strings)} of {len(length_filtered)}" if len(length_filtered) > DISPLAY_LIMIT else f"Showing {len(length_filtered)}"
+                    status_label.configure(text=f"{showing_msg} strings{filter_msg}")
                 else:
                     strings_text.insert("1.0", "No strings match the length filter")
                     status_label.configure(text="No matches")
@@ -5780,30 +5797,32 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 filtered = [s for s in length_filtered if search_term in s.lower()]
 
                 if filtered:
-                    for s in filtered[:1000]:  # Limit for performance
-                        # Highlight search term
+                    display_strings = filtered[:DISPLAY_LIMIT]
+                    # Batch insert: build all text first, then insert once
+                    display_text = "\n".join(display_strings)
+                    strings_text.insert("1.0", display_text)
+
+                    # Batch highlighting: collect all positions first
+                    highlight_positions = []
+                    for line_num, s in enumerate(display_strings, 1):
                         lower_s = s.lower()
                         start_idx = 0
-                        display_line = s + "\n"
-                        strings_text.insert("end", display_line)
-
-                        # Find and tag matches
                         while True:
                             pos = lower_s.find(search_term, start_idx)
                             if pos == -1:
                                 break
-
-                            # Calculate text widget position
-                            line_num = int(strings_text.index("end").split(".")[0]) - 1
-                            tag_start = f"{line_num}.{pos}"
-                            tag_end = f"{line_num}.{pos + len(search_term)}"
-                            strings_text.tag_add("highlight", tag_start, tag_end)
+                            highlight_positions.append((f"{line_num}.{pos}", f"{line_num}.{pos + len(search_term)}"))
                             start_idx = pos + len(search_term)
+
+                    # Apply all highlights at once
+                    for tag_start, tag_end in highlight_positions:
+                        strings_text.tag_add("highlight", tag_start, tag_end)
 
                     filter_msg = ""
                     if min_len > 0 or max_len < float('inf'):
                         filter_msg = f" (length: {min_len}-{max_len if max_len != float('inf') else '∞'})"
-                    status_label.configure(text=f"Found: {len(filtered)} matches{filter_msg}")
+                    showing_msg = f"Showing {len(display_strings)} of {len(filtered)}" if len(filtered) > DISPLAY_LIMIT else f"Found {len(filtered)}"
+                    status_label.configure(text=f"{showing_msg} matches{filter_msg}")
                 else:
                     strings_text.insert("1.0", f"No strings found matching '{search_term}' with current filters")
                     status_label.configure(text="No matches")

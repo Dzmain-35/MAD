@@ -382,23 +382,27 @@ class ProcmonLiveMonitor:
     
     def get_recent_events(self, count: int = 100, event_type: Optional[str] = None) -> List[Dict]:
         """
-        Get recent events
-        
+        Get recent events (optimized to work backwards)
+
         Args:
             count: Number of recent events to return
             event_type: Filter by event type (File, Registry, Thread, etc.) or None for all
-            
+
         Returns:
             List of event dictionaries
         """
-        events = list(self.events)
-        
-        # Filter by type if specified
-        if event_type:
-            events = [e for e in events if e.event_type == event_type]
-        
-        # Return most recent
-        return [e.to_dict() for e in list(events)[-count:]]
+        # Optimized: work backwards and only convert what we need
+        result = []
+        for event in reversed(self.events):
+            if event_type and event.event_type != event_type:
+                continue
+            result.append(event.to_dict())
+            if len(result) >= count:
+                break
+
+        # Reverse to maintain chronological order
+        result.reverse()
+        return result
     
     def get_events_queue(self) -> queue.Queue:
         """Get the event queue for GUI updates"""

@@ -231,8 +231,11 @@ class SystemWideMonitor:
         self.is_monitoring = False
         self.monitor_threads = []
 
-        # Event callbacks
+        # Event callbacks and batching
         self.event_callbacks = []
+        self._pending_callback_events = []  # Batch events for callbacks
+        self._callback_lock = threading.Lock()
+        self._last_callback_flush = time.time()
 
         # Statistics
         self.stats = {
@@ -282,14 +285,11 @@ class SystemWideMonitor:
             self.sysmon_monitor.start_monitoring()
             print("System-wide monitor: Sysmon monitoring started")
 
-        # ALWAYS start psutil fallback for process/network/file/thread monitoring
-        # This ensures we have events even if Sysmon fails or is slow
-        print("System-wide monitor: Starting psutil process/network/file/thread monitoring")
+        # Use single unified monitor thread instead of 4 separate threads
+        # This reduces CPU overhead by iterating processes only once per cycle
+        print("System-wide monitor: Starting unified psutil monitoring")
         self.monitor_threads = [
-            threading.Thread(target=self._monitor_processes, daemon=True),
-            threading.Thread(target=self._monitor_network, daemon=True),
-            threading.Thread(target=self._monitor_files, daemon=True),
-            threading.Thread(target=self._monitor_threads, daemon=True),
+            threading.Thread(target=self._unified_monitor, daemon=True),
         ]
 
         for thread in self.monitor_threads:
@@ -326,7 +326,7 @@ class SystemWideMonitor:
             pass
 
     def _add_event(self, event: Dict):
-        """Add event to storage and notify callbacks"""
+        """Add event to storage and queue for batch callback notification"""
         self.events.append(event)
         self.event_queue.put(event)
 
@@ -352,15 +352,35 @@ class SystemWideMonitor:
         if self.stats['total_events'] <= 10:
             print(f"[DEBUG] Event #{self.stats['total_events']}: {event_type} | {event.get('operation')} | PID:{event.get('pid')} | {event.get('path', '')[:50]}")
 
-        # Notify callbacks
-        for callback in self.event_callbacks:
-            try:
-                callback(event)
-            except Exception as e:
-                print(f"Error in event callback: {e}")
+        # Queue event for batch callback (instead of calling immediately)
+        if self.event_callbacks:
+            with self._callback_lock:
+                self._pending_callback_events.append(event)
 
-    def _monitor_processes(self):
-        """Monitor process creation/termination (psutil fallback)"""
+    def _flush_callbacks(self):
+        """Flush pending events to callbacks (called periodically for batching)"""
+        if not self.event_callbacks or not self._pending_callback_events:
+            return
+
+        with self._callback_lock:
+            events_to_send = self._pending_callback_events[:]
+            self._pending_callback_events.clear()
+
+        if events_to_send:
+            for callback in self.event_callbacks:
+                try:
+                    # Send batch of events to callback
+                    for event in events_to_send:
+                        callback(event)
+                except Exception as e:
+                    print(f"Error in event callback: {e}")
+
+    def _unified_monitor(self):
+        """
+        Unified monitor that handles all event types in a single thread.
+        This is more efficient than 4 separate threads as it only iterates
+        through processes once per cycle.
+        """
         # Initialize known processes
         try:
             for proc in psutil.process_iter(['pid', 'name']):
@@ -368,45 +388,182 @@ class SystemWideMonitor:
         except:
             pass
 
+        cycle_count = 0
         while self.is_monitoring:
             try:
+                cycle_start = time.time()
+                cycle_count += 1
                 current_processes = set()
+                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                time_full = datetime.now().isoformat()
 
+                # Single iteration through all processes
                 for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
-                    pid = proc.info['pid']
-                    current_processes.add(pid)
+                    try:
+                        pid = proc.info['pid']
+                        process_name = proc.info.get('name', 'Unknown')
+                        current_processes.add(pid)
 
-                    # New process detected
-                    if pid not in self.known_processes:
+                        # === PROCESS EVENTS ===
+                        if pid not in self.known_processes:
+                            try:
+                                cmdline = ' '.join(proc.info.get('cmdline', [])) if proc.info.get('cmdline') else ''
+                                exe = proc.info.get('exe', process_name)
+                                event = {
+                                    'timestamp': timestamp,
+                                    'time_full': time_full,
+                                    'event_type': 'Process',
+                                    'operation': 'ProcessCreate',
+                                    'path': exe,
+                                    'result': 'SUCCESS',
+                                    'detail': f'Command: {cmdline[:150]}',
+                                    'pid': pid,
+                                    'tid': 0,
+                                    'process_name': process_name
+                                }
+                                if self.event_filter.matches(event):
+                                    self._add_event(event)
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+
+                        # Get process object for detailed monitoring
                         try:
-                            cmdline = ' '.join(proc.info.get('cmdline', [])) if proc.info.get('cmdline') else ''
-                            exe = proc.info.get('exe', proc.info.get('name', 'Unknown'))
-
-                            event = {
-                                'timestamp': datetime.now().strftime("%H:%M:%S.%f")[:-3],
-                                'time_full': datetime.now().isoformat(),
-                                'event_type': 'Process',
-                                'operation': 'ProcessCreate',
-                                'path': exe,
-                                'result': 'SUCCESS',
-                                'detail': f'Command: {cmdline[:150]}',
-                                'pid': pid,
-                                'tid': 0,
-                                'process_name': proc.info.get('name', 'Unknown')
-                            }
-
-                            if self.event_filter.matches(event):
-                                self._add_event(event)
-
+                            proc_obj = psutil.Process(pid)
                         except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+
+                        # === NETWORK EVENTS ===
+                        try:
+                            connections = proc_obj.connections()
+                            current_conns = set()
+                            for conn in connections:
+                                if conn.raddr:
+                                    conn_id = f"{conn.laddr.ip}:{conn.laddr.port}-{conn.raddr.ip}:{conn.raddr.port}"
+                                    current_conns.add(conn_id)
+                                    if pid not in self.known_connections:
+                                        self.known_connections[pid] = set()
+                                    if conn_id not in self.known_connections[pid]:
+                                        event = {
+                                            'timestamp': timestamp,
+                                            'time_full': time_full,
+                                            'event_type': 'Network',
+                                            'operation': 'NetworkConnect',
+                                            'path': f"{conn.raddr.ip}:{conn.raddr.port}",
+                                            'result': conn.status,
+                                            'detail': f"Local: {conn.laddr.ip}:{conn.laddr.port}",
+                                            'pid': pid,
+                                            'tid': 0,
+                                            'process_name': process_name
+                                        }
+                                        if self.event_filter.matches(event):
+                                            self._add_event(event)
+                            self.known_connections[pid] = current_conns
+                        except (psutil.AccessDenied, psutil.NoSuchProcess):
                             pass
 
-                # Detect terminated processes
-                terminated = self.known_processes - current_processes
-                for pid in terminated:
+                        # === FILE EVENTS ===
+                        try:
+                            current_files = set()
+                            for file_info in proc_obj.open_files():
+                                current_files.add(file_info.path)
+
+                            if pid not in self.known_files:
+                                self.known_files[pid] = set()
+
+                            # New files
+                            for file_path in (current_files - self.known_files[pid]):
+                                operation = "LoadImage" if file_path.lower().endswith(('.dll', '.exe', '.sys')) else "CreateFile"
+                                event = {
+                                    'timestamp': timestamp,
+                                    'time_full': time_full,
+                                    'event_type': 'File',
+                                    'operation': operation,
+                                    'path': file_path,
+                                    'result': 'SUCCESS',
+                                    'detail': 'File opened',
+                                    'pid': pid,
+                                    'tid': 0,
+                                    'process_name': process_name
+                                }
+                                if self.event_filter.matches(event):
+                                    self._add_event(event)
+
+                            # Closed files
+                            for file_path in (self.known_files[pid] - current_files):
+                                event = {
+                                    'timestamp': timestamp,
+                                    'time_full': time_full,
+                                    'event_type': 'File',
+                                    'operation': 'CloseFile',
+                                    'path': file_path,
+                                    'result': 'SUCCESS',
+                                    'detail': 'File closed',
+                                    'pid': pid,
+                                    'tid': 0,
+                                    'process_name': process_name
+                                }
+                                if self.event_filter.matches(event):
+                                    self._add_event(event)
+
+                            self.known_files[pid] = current_files
+                        except (psutil.AccessDenied, psutil.NoSuchProcess):
+                            pass
+
+                        # === THREAD EVENTS ===
+                        try:
+                            current_threads = set()
+                            for thread in proc_obj.threads():
+                                current_threads.add(thread.id)
+
+                            if pid not in self.known_threads:
+                                self.known_threads[pid] = current_threads.copy()
+                            else:
+                                # New threads
+                                for tid in (current_threads - self.known_threads[pid]):
+                                    event = {
+                                        'timestamp': timestamp,
+                                        'time_full': time_full,
+                                        'event_type': 'Thread',
+                                        'operation': 'ThreadCreate',
+                                        'path': f'TID {tid}',
+                                        'result': 'SUCCESS',
+                                        'detail': f'New thread in {process_name}',
+                                        'pid': pid,
+                                        'tid': tid,
+                                        'process_name': process_name
+                                    }
+                                    if self.event_filter.matches(event):
+                                        self._add_event(event)
+
+                                # Terminated threads
+                                for tid in (self.known_threads[pid] - current_threads):
+                                    event = {
+                                        'timestamp': timestamp,
+                                        'time_full': time_full,
+                                        'event_type': 'Thread',
+                                        'operation': 'ThreadExit',
+                                        'path': f'TID {tid}',
+                                        'result': 'SUCCESS',
+                                        'detail': 'Thread terminated',
+                                        'pid': pid,
+                                        'tid': tid,
+                                        'process_name': process_name
+                                    }
+                                    if self.event_filter.matches(event):
+                                        self._add_event(event)
+
+                                self.known_threads[pid] = current_threads
+                        except (psutil.AccessDenied, psutil.NoSuchProcess):
+                            pass
+
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+
+                # === PROCESS TERMINATION EVENTS ===
+                for pid in (self.known_processes - current_processes):
                     event = {
-                        'timestamp': datetime.now().strftime("%H:%M:%S.%f")[:-3],
-                        'time_full': datetime.now().isoformat(),
+                        'timestamp': timestamp,
+                        'time_full': time_full,
                         'event_type': 'Process',
                         'operation': 'ProcessTerminate',
                         'path': f'PID {pid}',
@@ -416,228 +573,38 @@ class SystemWideMonitor:
                         'tid': 0,
                         'process_name': ''
                     }
-
                     if self.event_filter.matches(event):
                         self._add_event(event)
 
                 self.known_processes = current_processes
 
-                time.sleep(1)  # Check every second
-
-            except Exception as e:
-                print(f"Error monitoring processes: {e}")
-                time.sleep(2)
-
-    def _monitor_network(self):
-        """Monitor network connections (psutil fallback)"""
-        while self.is_monitoring:
-            try:
-                for proc in psutil.process_iter(['pid', 'name']):
-                    try:
-                        pid = proc.info['pid']
-                        proc_obj = psutil.Process(pid)
-                        connections = proc_obj.connections()
-
-                        current_conns = set()
-                        for conn in connections:
-                            if conn.raddr:  # Has remote address
-                                conn_id = f"{conn.laddr.ip}:{conn.laddr.port}-{conn.raddr.ip}:{conn.raddr.port}"
-                                current_conns.add(conn_id)
-
-                                # Check if this is a new connection
-                                if pid not in self.known_connections:
-                                    self.known_connections[pid] = set()
-
-                                if conn_id not in self.known_connections[pid]:
-                                    event = {
-                                        'timestamp': datetime.now().strftime("%H:%M:%S.%f")[:-3],
-                                        'time_full': datetime.now().isoformat(),
-                                        'event_type': 'Network',
-                                        'operation': 'NetworkConnect',
-                                        'path': f"{conn.raddr.ip}:{conn.raddr.port}",
-                                        'result': conn.status,
-                                        'detail': f"Local: {conn.laddr.ip}:{conn.laddr.port} | Protocol: {conn.type}",
-                                        'pid': pid,
-                                        'tid': 0,
-                                        'process_name': proc.info.get('name', 'Unknown')
-                                    }
-
-                                    if self.event_filter.matches(event):
-                                        self._add_event(event)
-
-                        self.known_connections[pid] = current_conns
-
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-
-                time.sleep(2)  # Check every 2 seconds
-
-            except Exception as e:
-                print(f"Error monitoring network: {e}")
-                time.sleep(3)
-
-    def _monitor_files(self):
-        """Monitor file activity (psutil fallback)"""
-        while self.is_monitoring:
-            try:
-                for proc in psutil.process_iter(['pid', 'name']):
-                    try:
-                        pid = proc.info['pid']
-                        proc_obj = psutil.Process(pid)
-
-                        # Get current open files
-                        current_files = set()
-                        try:
-                            for file_info in proc_obj.open_files():
-                                current_files.add(file_info.path)
-                        except (psutil.AccessDenied, psutil.NoSuchProcess):
-                            continue
-
-                        # Initialize tracking for new processes
-                        if pid not in self.known_files:
-                            self.known_files[pid] = set()
-
-                        # Find newly opened files
-                        new_files = current_files - self.known_files[pid]
-                        for file_path in new_files:
-                            # Determine operation based on file extension
-                            operation = "CreateFile"
-                            if file_path.lower().endswith(('.dll', '.exe', '.sys')):
-                                operation = "LoadImage"
-
-                            event = {
-                                'timestamp': datetime.now().strftime("%H:%M:%S.%f")[:-3],
-                                'time_full': datetime.now().isoformat(),
-                                'event_type': 'File',
-                                'operation': operation,
-                                'path': file_path,
-                                'result': 'SUCCESS',
-                                'detail': 'File opened',
-                                'pid': pid,
-                                'tid': 0,
-                                'process_name': proc.info.get('name', 'Unknown')
-                            }
-
-                            if self.event_filter.matches(event):
-                                self._add_event(event)
-
-                        # Find closed files
-                        closed_files = self.known_files[pid] - current_files
-                        for file_path in closed_files:
-                            event = {
-                                'timestamp': datetime.now().strftime("%H:%M:%S.%f")[:-3],
-                                'time_full': datetime.now().isoformat(),
-                                'event_type': 'File',
-                                'operation': 'CloseFile',
-                                'path': file_path,
-                                'result': 'SUCCESS',
-                                'detail': 'File closed',
-                                'pid': pid,
-                                'tid': 0,
-                                'process_name': proc.info.get('name', 'Unknown')
-                            }
-
-                            if self.event_filter.matches(event):
-                                self._add_event(event)
-
-                        self.known_files[pid] = current_files
-
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-
                 # Clean up tracking for terminated processes
-                current_pids = set(p.pid for p in psutil.process_iter())
                 for pid in list(self.known_files.keys()):
-                    if pid not in current_pids:
+                    if pid not in current_processes:
                         del self.known_files[pid]
-
-                time.sleep(2)  # Check every 2 seconds
-
-            except Exception as e:
-                print(f"Error monitoring files: {e}")
-                time.sleep(3)
-
-    def _monitor_threads(self):
-        """Monitor thread activity (psutil fallback)"""
-        while self.is_monitoring:
-            try:
-                for proc in psutil.process_iter(['pid', 'name']):
-                    try:
-                        pid = proc.info['pid']
-                        proc_obj = psutil.Process(pid)
-
-                        # Get current threads
-                        current_threads = set()
-                        try:
-                            for thread in proc_obj.threads():
-                                current_threads.add(thread.id)
-                        except (psutil.AccessDenied, psutil.NoSuchProcess):
-                            continue
-
-                        # Initialize tracking for new processes
-                        if pid not in self.known_threads:
-                            self.known_threads[pid] = current_threads.copy()
-                            continue  # Skip first scan to avoid flood of events
-
-                        # Find new threads
-                        new_threads = current_threads - self.known_threads[pid]
-                        for tid in new_threads:
-                            event = {
-                                'timestamp': datetime.now().strftime("%H:%M:%S.%f")[:-3],
-                                'time_full': datetime.now().isoformat(),
-                                'event_type': 'Thread',
-                                'operation': 'ThreadCreate',
-                                'path': f'TID {tid}',
-                                'result': 'SUCCESS',
-                                'detail': f'New thread in {proc.info.get("name", "Unknown")}',
-                                'pid': pid,
-                                'tid': tid,
-                                'process_name': proc.info.get('name', 'Unknown')
-                            }
-
-                            if self.event_filter.matches(event):
-                                self._add_event(event)
-
-                        # Find terminated threads
-                        terminated_threads = self.known_threads[pid] - current_threads
-                        for tid in terminated_threads:
-                            event = {
-                                'timestamp': datetime.now().strftime("%H:%M:%S.%f")[:-3],
-                                'time_full': datetime.now().isoformat(),
-                                'event_type': 'Thread',
-                                'operation': 'ThreadExit',
-                                'path': f'TID {tid}',
-                                'result': 'SUCCESS',
-                                'detail': 'Thread terminated',
-                                'pid': pid,
-                                'tid': tid,
-                                'process_name': proc.info.get('name', 'Unknown')
-                            }
-
-                            if self.event_filter.matches(event):
-                                self._add_event(event)
-
-                        self.known_threads[pid] = current_threads
-
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-
-                # Clean up tracking for terminated processes
-                current_pids = set(p.pid for p in psutil.process_iter())
                 for pid in list(self.known_threads.keys()):
-                    if pid not in current_pids:
+                    if pid not in current_processes:
                         del self.known_threads[pid]
+                for pid in list(self.known_connections.keys()):
+                    if pid not in current_processes:
+                        del self.known_connections[pid]
 
-                time.sleep(1)  # Check every 1 second (threads change faster)
+                # Flush batch callbacks periodically
+                self._flush_callbacks()
+
+                # Maintain ~2 second cycle time
+                elapsed = time.time() - cycle_start
+                sleep_time = max(0.1, 2.0 - elapsed)
+                time.sleep(sleep_time)
 
             except Exception as e:
-                print(f"Error monitoring threads: {e}")
+                print(f"Error in unified monitor: {e}")
                 time.sleep(2)
 
     def get_recent_events(self, count: int = 1000, event_type: Optional[str] = None,
                           since: Optional[datetime] = None) -> List[Dict]:
         """
-        Get recent events with optional filtering
+        Get recent events with optional filtering (optimized to work backwards)
 
         Args:
             count: Number of recent events to return
@@ -647,18 +614,22 @@ class SystemWideMonitor:
         Returns:
             List of event dictionaries
         """
-        events = list(self.events)
+        # Optimized: work backwards from end to avoid copying entire list
+        result = []
+        for event in reversed(self.events):
+            # Filter by time
+            if since and self._parse_event_time(event) <= since:
+                continue
+            # Filter by type
+            if event_type and event.get('event_type') != event_type:
+                continue
+            result.append(event)
+            if len(result) >= count:
+                break
 
-        # Filter by time if specified
-        if since:
-            events = [e for e in events if self._parse_event_time(e) > since]
-
-        # Filter by type if specified
-        if event_type:
-            events = [e for e in events if e.get('event_type') == event_type]
-
-        # Return most recent
-        return list(events)[-count:]
+        # Reverse to maintain chronological order
+        result.reverse()
+        return result
 
     def _parse_event_time(self, event: Dict) -> datetime:
         """Parse event timestamp to datetime"""

@@ -5415,11 +5415,17 @@ Errors: {scan_stats['errors']}"""
         details_window.geometry("1000x700")
 
         # Track if window is still open to prevent widget access after destruction
-        window_state = {"closed": False}
+        # Store window reference for existence checking
+        window_state = {"closed": False, "window": details_window}
 
         def on_window_close():
+            # Set closed flag FIRST before any destruction
             window_state["closed"] = True
-            details_window.destroy()
+            window_state["window"] = None
+            try:
+                details_window.destroy()
+            except Exception:
+                pass  # Window may already be destroyed
 
         details_window.protocol("WM_DELETE_WINDOW", on_window_close)
         
@@ -5719,8 +5725,16 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
         def search_strings(event=None):
             """Search and highlight strings with length filtering"""
-            # Check if window is still open
+            # Check if window is still open - robust check
             if window_state["closed"]:
+                return
+            try:
+                win = window_state.get("window")
+                if win is None or not win.winfo_exists():
+                    window_state["closed"] = True
+                    return
+            except Exception:
+                window_state["closed"] = True
                 return
             try:
                 search_term = search_entry.get().strip().lower()
@@ -5800,6 +5814,9 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         # Re-extract when quality filter changes
         def on_quality_filter_change():
             """Re-extract strings when quality filter setting changes"""
+            # Don't re-extract if window is closed
+            if window_state["closed"]:
+                return
             # Re-extract with current mode
             threading.Thread(target=lambda: extract(all_strings_data["current_mode"]), daemon=True).start()
 
@@ -5807,13 +5824,24 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
         # Extract strings in background with progressive loading
         def extract(scan_mode="quick"):
-            # Helper to safely update UI widgets
+            # Helper to safely update UI widgets with robust existence checking
             def safe_update(func):
-                if not window_state["closed"]:
-                    try:
-                        self.root.after(0, func)
-                    except Exception:
-                        pass
+                if window_state["closed"]:
+                    return
+                try:
+                    # Verify window still exists before scheduling update
+                    win = window_state.get("window")
+                    if win is None:
+                        return
+                    # Check if window widget exists (winfo_exists)
+                    if not win.winfo_exists():
+                        window_state["closed"] = True
+                        return
+                    # Schedule update on main thread
+                    self.root.after(0, func)
+                except Exception:
+                    # Mark as closed if any error occurs
+                    window_state["closed"] = True
 
             try:
                 # Check if window is still open
@@ -5836,11 +5864,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                         fg_color="transparent", text="⚡ Quick Scan"))
 
                 safe_update(lambda: export_btn.configure(state="disabled"))
-                if not window_state["closed"]:
-                    try:
-                        status_label.configure(text=f"Extracting strings ({scan_mode} mode)...")
-                    except Exception:
-                        pass
+                safe_update(lambda mode=scan_mode: status_label.configure(text=f"Extracting strings ({mode} mode)..."))
 
                 # Get minimum length for extraction
                 try:
@@ -5854,10 +5878,10 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
                 # Progressive callback for UI updates
                 def progress_callback(current_strings, regions_total, regions_read, final=False):
-                    """Update UI with progressive results"""
-                    # Skip if window is closed
+                    """Update UI with progressive results. Returns False to cancel extraction."""
+                    # Return False to signal cancellation if window is closed
                     if window_state["closed"]:
-                        return
+                        return False  # Signal cancellation to memory extractor
                     try:
                         # Flatten strings for display
                         flat_strings = []
@@ -5865,19 +5889,22 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                             if isinstance(category_strings, list):
                                 flat_strings.extend(category_strings)
 
-                        # Update status
+                        # Update status label only (lightweight operation)
+                        # Don't update the full string display during progress - that's expensive
                         status_msg = f"{scan_mode.capitalize()} scan: {len(flat_strings)} strings | {regions_read}/{regions_total} regions"
                         if final:
                             status_msg = f"Complete: {len(flat_strings)} strings ({scan_mode} mode)"
 
                         safe_update(lambda msg=status_msg: status_label.configure(text=msg))
 
-                        # Update display every 10 regions or on final
-                        if final or regions_read % 10 == 0:
-                            all_strings_data["strings"] = flat_strings
-                            safe_update(search_strings)
+                        # Store strings for later but don't refresh display during progress
+                        # This prevents UI slowdown from repeated text widget updates
+                        all_strings_data["strings"] = flat_strings
+
+                        return True  # Continue extraction
                     except Exception as e:
                         print(f"Progress callback error: {e}")
+                        return True  # Continue on error
 
                 # Extract with scan_mode and progressive callback - get full result with metadata
                 extraction_result = self.process_monitor.extract_strings_from_process(
@@ -5944,9 +5971,8 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
                 safe_update(lambda: export_btn.configure(state="normal"))
 
-                # Auto-apply current filters after extraction
-                if not window_state["closed"]:
-                    self.root.after(100, search_strings)
+                # Auto-apply current filters after extraction (delayed to let UI updates complete)
+                safe_update(lambda: self.root.after(100, search_strings))
 
                 # Auto-save strings to case folders
                 self.save_strings_to_case_folders(strings, name, pid, scan_mode)

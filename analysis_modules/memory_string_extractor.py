@@ -152,7 +152,7 @@ class MemoryStringExtractor:
             use_cache: Use cached results if available and within TTL
             scan_mode: 'quick' (IMAGE regions only, ~1-3 sec) or 'deep' (all regions, slower)
             progress_callback: Optional callback(current_strings, total_regions, regions_scanned)
-                             for progressive updates
+                             for progressive updates. Return False from callback to cancel extraction.
 
         Returns:
             Dictionary containing extracted strings and metadata
@@ -339,7 +339,12 @@ class MemoryStringExtractor:
                                     # Convert sets to lists for callback
                                     current_strings = {k: sorted(list(v))[:max_strings]
                                                      for k, v in result['strings'].items()}
-                                    progress_callback(current_strings, regions_scanned, regions_read)
+                                    # Check if callback returns False to signal cancellation
+                                    callback_result = progress_callback(current_strings, regions_scanned, regions_read)
+                                    if callback_result is False:
+                                        if self.verbose:
+                                            print(f"[MemoryExtractor] Extraction cancelled by callback")
+                                        break  # Exit the extraction loop
                                 except Exception as e:
                                     if self.verbose:
                                         print(f"[MemoryExtractor] Callback error: {e}")

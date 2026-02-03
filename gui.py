@@ -5953,8 +5953,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
                 # Update UI in main thread (only if window still open)
                 if window_state["closed"]:
-                    # Still save to case folders even if window closed
-                    self.save_strings_to_case_folders(strings, name, pid, scan_mode)
+                    # Window closed - don't save, user can export manually if needed
                     return
 
                 filter_status = "Quality Filtered" if use_quality_filter else "All Strings (Unfiltered)"
@@ -5979,8 +5978,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 # Auto-apply current filters after extraction (delayed to let UI updates complete)
                 safe_update(lambda: self.root.after(100, search_strings))
 
-                # Auto-save strings to case folders
-                self.save_strings_to_case_folders(strings, name, pid, scan_mode)
+                # Note: Strings are saved to case folders only when user clicks Export TXT
 
             except Exception as e:
                 import traceback
@@ -6069,6 +6067,10 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                         process_name=name
                     )
                     if success:
+                        # Also save to case folders (runs in background)
+                        scan_mode = all_strings_data.get('current_mode', 'extracted')
+                        self.save_strings_to_case_folders(all_strings_data["strings"], name, pid, scan_mode)
+
                         # Show summary including metadata
                         mem_regions = len(extraction_result.get('memory_regions', []))
                         bytes_scanned = extraction_result.get('total_bytes_scanned', 0)
@@ -6076,6 +6078,8 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                         summary += f"Memory Regions Scanned: {mem_regions}\n"
                         summary += f"Total Bytes Scanned: {bytes_scanned:,}\n"
                         summary += f"Extraction Method: {extraction_result.get('extraction_method', 'unknown')}"
+                        if self.current_case:
+                            summary += "\n\nAlso saved to case folder."
                         messagebox.showinfo("Export Complete", summary)
                     else:
                         messagebox.showerror("Export Failed", "Failed to export strings")

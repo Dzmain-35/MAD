@@ -5812,9 +5812,21 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             strings_text.tag_config("highlight", background=self.colors["red"], foreground="white")
             strings_text.configure(state="disabled")
 
-        search_entry.bind("<KeyRelease>", search_strings)
-        min_length_entry.bind("<KeyRelease>", search_strings)
-        max_length_entry.bind("<KeyRelease>", search_strings)
+        # Debounce search to avoid UI freeze on every keystroke
+        search_debounce = {"timer": None}
+
+        def debounced_search(event=None):
+            """Debounced search - waits 300ms after last keystroke"""
+            if search_debounce["timer"]:
+                try:
+                    self.root.after_cancel(search_debounce["timer"])
+                except Exception:
+                    pass
+            search_debounce["timer"] = self.root.after(300, search_strings)
+
+        search_entry.bind("<KeyRelease>", debounced_search)
+        min_length_entry.bind("<KeyRelease>", debounced_search)
+        max_length_entry.bind("<KeyRelease>", debounced_search)
 
         # Re-extract when quality filter changes
         def on_quality_filter_change():
@@ -6096,8 +6108,13 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
         deep_scan_btn.configure(command=lambda: threading.Thread(target=lambda: extract("deep"), daemon=True).start())
         export_btn.configure(command=export_strings)
 
-        # Initial extraction (Quick Scan by default)
-        threading.Thread(target=lambda: extract("quick"), daemon=True).start()
+        # Show initial message instead of auto-extracting (reduces startup load)
+        strings_text.configure(state="normal")
+        strings_text.insert("1.0", "Click 'Quick Scan' or 'Deep Scan' to extract strings from process memory.\n\n"
+                           "Quick Scan: Extracts strings from executable regions only (~1-3 seconds)\n"
+                           "Deep Scan: Extracts strings from all memory regions (slower but more comprehensive)")
+        strings_text.configure(state="disabled")
+        status_label.configure(text="Ready - Click a scan button to begin")
 
         # ===== LIVE EVENTS TAB =====
         events_frame = ctk.CTkFrame(content_area, fg_color="transparent")
@@ -6244,7 +6261,8 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             "monitor": None,
             "monitoring": False,
             "filter": "All",
-            "update_job": None
+            "update_job": None,
+            "last_event_count": 0  # Track for incremental updates
         }
 
         def toggle_monitoring():
@@ -6252,6 +6270,10 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
             if not event_monitor_state["monitoring"]:
                 # Start monitoring
                 try:
+                    # Clear tree and reset count for fresh start
+                    events_tree.delete(*events_tree.get_children())
+                    event_monitor_state["last_event_count"] = 0
+
                     # Create and start procmon monitor
                     monitor = ProcmonLiveMonitor(pid, max_events=5000)
                     monitor.start_monitoring()
@@ -6287,7 +6309,7 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                     event_monitor_state["update_job"] = None
 
         def refresh_events():
-            """Refresh the events display"""
+            """Refresh the events display (incremental updates for performance)"""
             if not event_monitor_state["monitoring"] or not event_monitor_state["monitor"]:
                 return
 
@@ -6295,23 +6317,35 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                 monitor = event_monitor_state["monitor"]
                 filter_type = event_monitor_state["filter"]
 
-                # Get events
-                events = monitor.get_recent_events(count=1000,
+                # Get all events (we'll track which ones we've seen)
+                events = monitor.get_recent_events(count=2000,
                                                   event_type=None if filter_type == "All" else filter_type)
 
-                # Update tree
-                events_tree.delete(*events_tree.get_children())
+                # Track how many events we've already displayed
+                last_count = event_monitor_state.get("last_event_count", 0)
+                current_count = len(events)
 
-                for event in events:
-                    events_tree.insert("", "end", values=(
-                        event['timestamp'],
-                        event['event_type'],
-                        event['operation'],
-                        event['path'][:80] + "..." if len(event['path']) > 80 else event['path'],
-                        event['result']
-                    ))
+                # Only add new events (incremental update)
+                if current_count > last_count:
+                    new_events = events[last_count:]
+                    for event in new_events:
+                        events_tree.insert("", "end", values=(
+                            event['timestamp'],
+                            event['event_type'],
+                            event['operation'],
+                            event['path'][:80] + "..." if len(event['path']) > 80 else event['path'],
+                            event['result']
+                        ))
 
-                # Update statistics
+                event_monitor_state["last_event_count"] = current_count
+
+                # Limit tree size for performance (keep last 1000 displayed)
+                children = events_tree.get_children()
+                if len(children) > 1000:
+                    for item in children[:len(children) - 1000]:
+                        events_tree.delete(item)
+
+                # Update statistics (lightweight operation)
                 stats = monitor.get_stats()
                 stats_label.configure(
                     text=f"Total: {stats['total_events']} | "
@@ -6321,8 +6355,8 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
                          f"Process: {stats['process_events']}"
                 )
 
-                # Schedule next refresh
-                event_monitor_state["update_job"] = details_window.after(500, refresh_events)
+                # Schedule next refresh (increased to 1 second for less overhead)
+                event_monitor_state["update_job"] = details_window.after(1000, refresh_events)
 
             except Exception as e:
                 print(f"Error refreshing events: {e}")
@@ -6408,9 +6442,8 @@ Parent PID: {info['parent_pid']} ({info['parent_name']})
 
             tabs[tab_name].pack(fill="both", expand=True)
 
-            # Auto-start monitoring when events tab is opened
-            if tab_name == "events" and not event_monitor_state["monitoring"]:
-                toggle_monitoring()
+            # Don't auto-start monitoring - let user click Start button
+            # This reduces CPU load when user just wants to view process info/strings
 
         show_tab("info")
 

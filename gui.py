@@ -1453,8 +1453,11 @@ class ForensicAnalysisGUI:
         filter_label1.pack(side="left", padx=(0, 10))
 
         # Event type filter buttons
-        filter_types = ["All", "File", "Registry", "Network", "Process", "Thread", "DNS"]
+        # Registry and DNS require Sysmon - mark with asterisk
+        filter_types = ["All", "File", "Registry*", "Network", "Process", "Thread", "DNS*"]
         event_type_buttons = {}
+        # Map display names to internal filter names
+        filter_name_map = {"Registry*": "Registry", "DNS*": "DNS"}
 
         for ftype in filter_types:
             btn = ctk.CTkButton(
@@ -1469,7 +1472,9 @@ class ForensicAnalysisGUI:
                 border_color=self.colors["red"]
             )
             btn.pack(side="left", padx=3)
-            event_type_buttons[ftype] = btn
+            # Store with internal name for filtering
+            internal_name = filter_name_map.get(ftype, ftype)
+            event_type_buttons[internal_name] = btn
 
         # Suspicious only toggle
         suspicious_var = tk.BooleanVar(value=False)
@@ -1676,7 +1681,7 @@ class ForensicAnalysisGUI:
                         sysmon_status.configure(text="✓ Sysmon Enabled (Full monitoring)",
                                               text_color="#10b981")
                     else:
-                        sysmon_status.configure(text="⚠ Sysmon Not Available (Limited monitoring)",
+                        sysmon_status.configure(text="⚠ No Sysmon (Registry/DNS unavailable)",
                                               text_color="#f59e0b")
 
                     # Apply current filters

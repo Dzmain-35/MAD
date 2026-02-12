@@ -1,14 +1,9 @@
 psutil
-os-sys
 tqdm
 tk
-argparse
 pyperclip
-traceback
 virustotal-api
 yara-python
-shutil
-time
 watchdog
 wmi
 reportlab
@@ -17,7 +12,7 @@ win10toast
 pefile
 reportlab
 customtkinter
-scikit-learn
 pandas
 requests
 Pillow
+pyyaml
